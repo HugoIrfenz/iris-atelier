@@ -43,8 +43,17 @@ import {
   ArrowUpRight,
   Activity,
   Eye,
-  ListOrdered
+  ListOrdered,
+  Folder,
+  FolderCheck
 } from 'lucide-react'
+
+interface Album {
+  id: number
+  name: string
+  created_at: string
+  count: number
+}
 
 interface CharacterTemplate {
   id: string
@@ -309,6 +318,15 @@ export default function App() {
   const [isExportingZip, setIsExportingZip] = useState(false)
   const [isBatchDeleting, setIsBatchDeleting] = useState(false)
 
+  // Albums state
+  const [albums, setAlbums] = useState<Album[]>([])
+  const [selectedAlbumId, setSelectedAlbumId] = useState<number | null>(null)
+  const [showAddToAlbumModal, setShowAddToAlbumModal] = useState(false)
+  const [showCreateAlbumModal, setShowCreateAlbumModal] = useState(false)
+  const [newAlbumInput, setNewAlbumInput] = useState('')
+  const [albumFeedbackMsg, setAlbumFeedbackMsg] = useState('')
+  const [targetJobIdsForAlbum, setTargetJobIdsForAlbum] = useState<string[]>([])
+
   // Modals
   const [showShutdownModal, setShowShutdownModal] = useState(false)
   const [isShutDown, setIsShutDown] = useState(false)
@@ -418,12 +436,29 @@ export default function App() {
     loadModels()
   }, [])
 
+  // Load albums
+  const loadAlbums = async () => {
+    try {
+      const res = await fetch('/api/albums')
+      if (res.ok) {
+        setAlbums(await res.json())
+      }
+    } catch (e) {
+      console.error('Failed to load albums', e)
+    }
+  }
+
+  useEffect(() => {
+    loadAlbums()
+  }, [])
+
   // Load gallery
   const loadGallery = async () => {
     try {
       const params = new URLSearchParams()
       if (gallerySearch) params.append('search', gallerySearch)
       if (favoritesOnly) params.append('favorites_only', 'true')
+      if (selectedAlbumId !== null) params.append('album_id', selectedAlbumId.toString())
       const res = await fetch(`/api/gallery?${params.toString()}`)
       if (res.ok) {
         const items = await res.json()
@@ -436,7 +471,7 @@ export default function App() {
 
   useEffect(() => {
     loadGallery()
-  }, [gallerySearch, favoritesOnly])
+  }, [gallerySearch, favoritesOnly, selectedAlbumId])
 
   // Load characters on startup
   const loadCharacters = async () => {
@@ -782,6 +817,171 @@ export default function App() {
     const nextIdx = (displayedGalleryIndex + 1) % gallery.length
     setDisplayedGalleryIndex(nextIdx)
     setSelectedItem(gallery[nextIdx])
+  }
+
+  // Keyboard Arrow navigation (< / > or ArrowLeft / ArrowRight)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+      ) {
+        return
+      }
+
+      if (e.key === 'ArrowLeft' || e.key === '<' || e.key === ',') {
+        e.preventDefault()
+        handlePrevImage()
+      } else if (e.key === 'ArrowRight' || e.key === '>' || e.key === '.') {
+        e.preventDefault()
+        handleNextImage()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [gallery, displayedGalleryIndex, selectedItem])
+
+  // Album actions
+  const handleOpenAddToAlbum = (jobIds?: string[] | string) => {
+    let targets: string[] = []
+    if (typeof jobIds === 'string') {
+      targets = [jobIds]
+    } else if (Array.isArray(jobIds) && jobIds.length > 0) {
+      targets = jobIds
+    } else if (selectedJobIds.length > 0) {
+      targets = selectedJobIds
+    } else if (selectedItem) {
+      targets = [selectedItem.job_id]
+    }
+
+    if (targets.length === 0) {
+      alert('Please select at least one image to categorize into an album.')
+      return
+    }
+
+    setTargetJobIdsForAlbum(targets)
+    setNewAlbumInput('')
+    setAlbumFeedbackMsg('')
+    setShowAddToAlbumModal(true)
+  }
+
+  const handleAddTargetImagesToAlbum = async (albumId: number, albumName: string) => {
+    if (targetJobIdsForAlbum.length === 0) return
+    try {
+      const res = await fetch(`/api/albums/${albumId}/add`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ job_ids: targetJobIdsForAlbum })
+      })
+      if (res.ok) {
+        setAlbumFeedbackMsg(`Added ${targetJobIdsForAlbum.length} image(s) to "${albumName}"!`)
+        loadAlbums()
+        loadGallery()
+        setTimeout(() => {
+          setShowAddToAlbumModal(false)
+          setAlbumFeedbackMsg('')
+        }, 1000)
+      } else {
+        const err = await res.json()
+        alert('Failed to add to album: ' + (err.detail || 'Unknown error'))
+      }
+    } catch (e: any) {
+      alert('Error adding to album: ' + e.message)
+    }
+  }
+
+  const handleCreateAlbumAndAdd = async () => {
+    const name = newAlbumInput.trim()
+    if (!name) {
+      alert('Please enter an album name.')
+      return
+    }
+    try {
+      const res = await fetch('/api/albums', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      })
+      if (res.ok) {
+        const created = await res.json()
+        if (targetJobIdsForAlbum.length > 0) {
+          await fetch(`/api/albums/${created.id}/add`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ job_ids: targetJobIdsForAlbum })
+          })
+          setAlbumFeedbackMsg(`Created "${name}" and added ${targetJobIdsForAlbum.length} image(s)!`)
+        } else {
+          setAlbumFeedbackMsg(`Album "${name}" created!`)
+        }
+        loadAlbums()
+        loadGallery()
+        setNewAlbumInput('')
+        setTimeout(() => {
+          setShowAddToAlbumModal(false)
+          setShowCreateAlbumModal(false)
+          setAlbumFeedbackMsg('')
+        }, 1000)
+      } else {
+        const err = await res.json()
+        alert('Failed to create album: ' + (err.detail || 'Unknown error'))
+      }
+    } catch (e: any) {
+      alert('Error creating album: ' + e.message)
+    }
+  }
+
+  const handleRemoveSelectedFromCurrentAlbum = async () => {
+    if (selectedAlbumId === null || selectedJobIds.length === 0) return
+    const currentAlbum = albums.find((a) => a.id === selectedAlbumId)
+    if (
+      !confirm(
+        `Remove ${selectedJobIds.length} image(s) from "${currentAlbum?.name || 'this album'}"?\n(Images will still remain safely in your main gallery)`
+      )
+    )
+      return
+
+    try {
+      const res = await fetch(`/api/albums/${selectedAlbumId}/remove`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ job_ids: selectedJobIds })
+      })
+      if (res.ok) {
+        setSelectedJobIds([])
+        loadAlbums()
+        loadGallery()
+      }
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
+  const handleDeleteAlbum = async (albumId: number, albumName: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation()
+    if (
+      !confirm(
+        `Are you sure you want to delete the album "${albumName}"?\n\nImages will NOT be deleted and will remain safely in your gallery.`
+      )
+    )
+      return
+
+    try {
+      const res = await fetch(`/api/albums/${albumId}`, { method: 'DELETE' })
+      if (res.ok) {
+        if (selectedAlbumId === albumId) {
+          setSelectedAlbumId(null)
+        }
+        loadAlbums()
+        loadGallery()
+      }
+    } catch (e) {
+      console.error(e)
+    }
   }
 
   // Model Download & Import handlers
@@ -1949,6 +2149,30 @@ export default function App() {
                       {selectedJobIds.length} selected
                     </span>
 
+                    {/* Add to Album Button */}
+                    <button
+                      type="button"
+                      onClick={() => handleOpenAddToAlbum()}
+                      className="px-2.5 py-1 rounded-lg bg-[#8699b8]/20 hover:bg-[#8699b8]/30 text-[#a8bbdc] border border-[#8699b8]/40 text-xs font-semibold flex items-center gap-1.5 transition"
+                      title="Add selected images to an album"
+                    >
+                      <FolderPlus className="w-3.5 h-3.5 text-[#8699b8]" />
+                      <span>Add to Album</span>
+                    </button>
+
+                    {/* If viewing a specific album: Remove from Album Button */}
+                    {selectedAlbumId !== null && (
+                      <button
+                        type="button"
+                        onClick={handleRemoveSelectedFromCurrentAlbum}
+                        className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-semibold flex items-center gap-1.5 transition"
+                        title="Remove from this album (images remain in gallery)"
+                      >
+                        <Folder className="w-3.5 h-3.5" />
+                        <span>Remove from Album</span>
+                      </button>
+                    )}
+
                     <button
                       type="button"
                       onClick={handleDownloadZip}
@@ -1993,7 +2217,7 @@ export default function App() {
                     type="button"
                     onClick={handlePrevImage}
                     className="p-2 rounded-xl bg-black/60 hover:bg-black text-slate-300 hover:text-white backdrop-blur border border-white/10 transition shadow-lg"
-                    title="Previous Image in Gallery"
+                    title="Previous Image (Keyboard: ◄ or <)"
                   >
                     <ChevronLeft className="w-4 h-4" />
                   </button>
@@ -2001,13 +2225,14 @@ export default function App() {
                     type="button"
                     onClick={handleNextImage}
                     className="p-2 rounded-xl bg-black/60 hover:bg-black text-slate-300 hover:text-white backdrop-blur border border-white/10 transition shadow-lg"
-                    title="Next Image in Gallery"
+                    title="Next Image (Keyboard: ► or >)"
                   >
                     <ChevronRight className="w-4 h-4" />
                   </button>
                   {gallery.length > 0 && (
-                    <span className="px-2.5 py-1 rounded-xl bg-black/60 text-slate-300 backdrop-blur border border-white/10 text-xs font-mono">
-                      {displayedGalleryIndex + 1} / {gallery.length}
+                    <span className="px-2.5 py-1 rounded-xl bg-black/60 text-slate-300 backdrop-blur border border-white/10 text-xs font-mono flex items-center gap-1.5 shadow-lg">
+                      <span>{displayedGalleryIndex + 1} / {gallery.length}</span>
+                      <span className="text-[10px] text-slate-400 border-l border-white/20 pl-1.5 hidden sm:inline" title="Press ◄ or ► to shuffle images">◄ / ►</span>
                     </span>
                   )}
                 </div>
@@ -2164,8 +2389,20 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Right Action Chips: Favorite & Download */}
+                {/* Right Action Chips: Add to Album, Favorite & Download */}
                 <div className="flex items-center gap-2">
+                  {currentActiveMeta?.job_id && (
+                    <button
+                      type="button"
+                      onClick={() => handleOpenAddToAlbum(currentActiveMeta.job_id)}
+                      className="px-3 py-1.5 rounded-lg bg-[#222836] hover:bg-[#2a3243] text-slate-200 border border-[#2e3748] font-medium text-xs flex items-center gap-1.5 transition"
+                      title="Add to album"
+                    >
+                      <FolderPlus className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Add to Album</span>
+                    </button>
+                  )}
+
                   {currentActiveMeta?.job_id && (
                     <button
                       type="button"
@@ -2200,10 +2437,91 @@ export default function App() {
           {/* Full Archive & Gallery Tab View */}
           {activeTab === 'gallery' && (
             <div className="flex-1 p-6 overflow-y-auto">
+              {/* Albums Filter Navigation Bar */}
+              <div className="mb-6 flex flex-wrap items-center justify-between gap-3 bg-[#161a23] p-3 rounded-2xl border border-[#262d3b]">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400 mr-1.5">
+                    <Folder className="w-4 h-4 text-amber-400" />
+                    <span>Albums</span>
+                  </div>
+
+                  {/* All Renders Tab */}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedAlbumId(null)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-medium transition flex items-center gap-1.5 ${
+                      selectedAlbumId === null
+                        ? 'bg-[#4d6b53] text-white shadow-md shadow-[#4d6b53]/20 border border-[#62886a]'
+                        : 'bg-[#1c212d] text-slate-300 hover:text-white hover:bg-[#222836] border border-[#2e3748]'
+                    }`}
+                  >
+                    <span>All Renders</span>
+                  </button>
+
+                  {/* Individual Album Badges */}
+                  {albums.map((album) => {
+                    const isSelected = selectedAlbumId === album.id
+                    return (
+                      <div
+                        key={album.id}
+                        className={`group relative flex items-center rounded-xl text-xs font-medium transition border ${
+                          isSelected
+                            ? 'bg-[#8699b8]/20 border-[#8699b8] text-indigo-200'
+                            : 'bg-[#1c212d] text-slate-300 hover:text-white hover:bg-[#222836] border-[#2e3748]'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setSelectedAlbumId(album.id)}
+                          className="px-3 py-1.5 flex items-center gap-1.5"
+                        >
+                          <Folder className={`w-3.5 h-3.5 ${isSelected ? 'text-indigo-300' : 'text-slate-400 group-hover:text-amber-300'}`} />
+                          <span>{album.name}</span>
+                          <span
+                            className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                              isSelected ? 'bg-indigo-500/30 text-indigo-200' : 'bg-slate-800 text-slate-400'
+                            }`}
+                          >
+                            {album.count}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteAlbum(album.id, album.name, e)}
+                          className="pr-2 pl-0.5 text-slate-500 hover:text-red-400 opacity-60 group-hover:opacity-100 transition"
+                          title={`Delete album "${album.name}" (images remain in gallery)`}
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* Right Action: Create New Album */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTargetJobIdsForAlbum([])
+                    setNewAlbumInput('')
+                    setAlbumFeedbackMsg('')
+                    setShowCreateAlbumModal(true)
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-[#222836] hover:bg-[#2a3243] text-slate-200 hover:text-white border border-[#2e3748] text-xs font-medium flex items-center gap-1.5 transition ml-auto"
+                >
+                  <Plus className="w-3.5 h-3.5 text-amber-400" />
+                  <span>New Album</span>
+                </button>
+              </div>
+
               {gallery.length === 0 ? (
                 <div className="text-center text-slate-500 py-24">
                   <ImageIcon className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-                  <p className="text-sm font-medium">No renders found in your atelier gallery.</p>
+                  <p className="text-sm font-medium">
+                    {selectedAlbumId !== null
+                      ? 'This album is currently empty. Select images and click "Add to Album" to populate it.'
+                      : 'No renders found in your atelier gallery.'}
+                  </p>
                 </div>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
@@ -2862,17 +3180,27 @@ export default function App() {
                 </button>
 
                 <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenAddToAlbum(selectedItem.job_id)}
+                    className="flex-1 py-2 rounded-xl bg-[#222836] hover:bg-[#2a3243] text-slate-200 border border-[#2e3748] text-xs font-medium flex items-center justify-center gap-1.5 transition"
+                  >
+                    <FolderPlus className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Add to Album</span>
+                  </button>
                   <a
                     href={selectedItem.image_url}
                     download={selectedItem.filename}
-                    className="flex-1 py-2 rounded-xl bg-[#222836] hover:bg-[#2a3243] text-slate-200 border border-[#2e3748] text-xs flex items-center justify-center gap-1.5 transition"
+                    className="flex-1 py-2 rounded-xl bg-[#222836] hover:bg-[#2a3243] text-slate-200 border border-[#2e3748] text-xs font-medium flex items-center justify-center gap-1.5 transition"
                   >
-                    Download
+                    <Download className="w-3.5 h-3.5 text-[#8699b8]" />
+                    <span>Download</span>
                   </a>
                   <button
                     type="button"
                     onClick={(e) => handleDelete(selectedItem.job_id, e)}
                     className="px-3 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 text-xs transition"
+                    title="Delete render"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
@@ -2908,6 +3236,185 @@ export default function App() {
                 className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold shadow-lg shadow-red-600/30 transition"
               >
                 Yes, Turn Off
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add To Album Modal */}
+      {showAddToAlbumModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#1c212d] border border-[#2e3748] rounded-2xl max-w-md w-full p-6 shadow-2xl">
+            <div className="flex items-center justify-between pb-4 border-b border-[#262d3b] mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center">
+                  <FolderPlus className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-serif font-bold text-base text-white">Add to Album</h3>
+                  <p className="text-[11px] text-slate-400">
+                    Categorizing {targetJobIdsForAlbum.length} image{targetJobIdsForAlbum.length > 1 ? 's' : ''} (images remain in gallery)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAddToAlbumModal(false)
+                  setAlbumFeedbackMsg('')
+                }}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-[#222836] transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {albumFeedbackMsg && (
+              <div className="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                <span>{albumFeedbackMsg}</span>
+              </div>
+            )}
+
+            {/* Existing Albums List */}
+            <div className="mb-4">
+              <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-2">
+                Choose Existing Album
+              </label>
+              {albums.length === 0 ? (
+                <div className="p-4 rounded-xl bg-[#151821] border border-[#262d3b] text-center text-xs text-slate-400">
+                  No albums created yet. Enter a name below to create your first album!
+                </div>
+              ) : (
+                <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                  {albums.map((album) => (
+                    <button
+                      key={album.id}
+                      type="button"
+                      onClick={() => handleAddTargetImagesToAlbum(album.id, album.name)}
+                      className="w-full flex items-center justify-between p-2.5 rounded-xl bg-[#151821] hover:bg-[#222836] border border-[#262d3b] hover:border-[#8699b8]/50 text-left transition group"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Folder className="w-4 h-4 text-amber-400 group-hover:text-amber-300" />
+                        <div>
+                          <div className="text-xs font-semibold text-white">{album.name}</div>
+                          <div className="text-[10px] text-slate-400">{album.count} items currently</div>
+                        </div>
+                      </div>
+                      <span className="text-[11px] px-2.5 py-1 rounded-lg bg-[#2e3748] text-slate-200 group-hover:bg-[#4d6b53] group-hover:text-white font-medium transition">
+                        + Add Here
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Quick Create Album & Add */}
+            <div className="pt-4 border-t border-[#262d3b]">
+              <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-2">
+                Or Create New Album & Add
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newAlbumInput}
+                  onChange={(e) => setNewAlbumInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      handleCreateAlbumAndAdd()
+                    }
+                  }}
+                  placeholder="e.g. Nixia Concept Renders, Anime Portraits..."
+                  className="flex-1 bg-[#151821] border border-[#262d3b] rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#8699b8] transition"
+                />
+                <button
+                  type="button"
+                  onClick={handleCreateAlbumAndAdd}
+                  className="px-3.5 py-2 rounded-xl bg-[#4d6b53] hover:bg-[#5c7f63] text-white text-xs font-semibold flex items-center gap-1.5 transition whitespace-nowrap shadow-sm"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Create & Add</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create New Album Modal */}
+      {showCreateAlbumModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#1c212d] border border-[#2e3748] rounded-2xl max-w-sm w-full p-6 shadow-2xl">
+            <div className="flex items-center justify-between pb-4 border-b border-[#262d3b] mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center">
+                  <Folder className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-serif font-bold text-base text-white">New Album</h3>
+                  <p className="text-[11px] text-slate-400">Organize your studio renders</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCreateAlbumModal(false)
+                  setAlbumFeedbackMsg('')
+                }}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-[#222836] transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {albumFeedbackMsg && (
+              <div className="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                <span>{albumFeedbackMsg}</span>
+              </div>
+            )}
+
+            <div className="mb-5">
+              <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-1.5">
+                Album Name
+              </label>
+              <input
+                type="text"
+                value={newAlbumInput}
+                onChange={(e) => setNewAlbumInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    handleCreateAlbumAndAdd()
+                  }
+                }}
+                placeholder="e.g. Nixia Showcase, Angela Office, Vivianne Kuudere"
+                autoFocus
+                className="w-full bg-[#151821] border border-[#262d3b] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#8699b8] transition"
+              />
+            </div>
+
+            <div className="flex gap-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCreateAlbumModal(false)
+                  setAlbumFeedbackMsg('')
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-[#222836] hover:bg-[#2a3243] text-slate-300 text-xs font-medium border border-[#2e3748] transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCreateAlbumAndAdd}
+                className="flex-1 py-2.5 rounded-xl bg-[#4d6b53] hover:bg-[#5c7f63] text-white text-xs font-semibold shadow-md shadow-[#4d6b53]/20 transition flex items-center justify-center gap-1.5"
+              >
+                <FolderCheck className="w-3.5 h-3.5" />
+                <span>Create Album</span>
               </button>
             </div>
           </div>

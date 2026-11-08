@@ -120,6 +120,21 @@ def init_db():
                 created_at TEXT
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS albums (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                created_at TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS album_items (
+                album_id INTEGER,
+                job_id TEXT,
+                added_at TEXT,
+                PRIMARY KEY (album_id, job_id)
+            )
+        """)
         # Seed default characters if empty or missing any
         for char in DEFAULT_CHARACTERS:
             existing = conn.execute("SELECT id FROM characters WHERE id = ?", (char["id"],)).fetchone()
@@ -210,16 +225,76 @@ def save_generation(data: dict):
         })
     conn.close()
 
-def list_generations(limit: int = 100, offset: int = 0, search: str = None, favorites_only: bool = False):
+def list_albums():
     conn = get_connection()
-    query = "SELECT * FROM generations WHERE 1=1"
+    rows = conn.execute("""
+        SELECT a.id, a.name, a.created_at, COUNT(ai.job_id) as count
+        FROM albums a
+        LEFT JOIN album_items ai ON a.id = ai.album_id
+        GROUP BY a.id
+        ORDER BY a.name COLLATE NOCASE ASC
+    """).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def create_album(name: str):
+    conn = get_connection()
+    now = datetime.now().isoformat()
+    with conn:
+        conn.execute("INSERT OR IGNORE INTO albums (name, created_at) VALUES (?, ?)", (name, now))
+        row = conn.execute("SELECT id, name, created_at FROM albums WHERE name = ?", (name,)).fetchone()
+    conn.close()
+    return {"id": row["id"], "name": row["name"], "created_at": row["created_at"], "count": 0} if row else None
+
+def delete_album(album_id: int):
+    conn = get_connection()
+    with conn:
+        conn.execute("DELETE FROM album_items WHERE album_id = ?", (album_id,))
+        conn.execute("DELETE FROM albums WHERE id = ?", (album_id,))
+    conn.close()
+    return True
+
+def add_to_album(album_id: int, job_ids: list):
+    conn = get_connection()
+    now = datetime.now().isoformat()
+    added = 0
+    with conn:
+        for jid in job_ids:
+            cur = conn.execute("INSERT OR IGNORE INTO album_items (album_id, job_id, added_at) VALUES (?, ?, ?)", (album_id, jid, now))
+            if cur.rowcount > 0:
+                added += 1
+    conn.close()
+    return added
+
+def remove_from_album(album_id: int, job_ids: list):
+    conn = get_connection()
+    removed = 0
+    with conn:
+        for jid in job_ids:
+            cur = conn.execute("DELETE FROM album_items WHERE album_id = ? AND job_id = ?", (album_id, jid))
+            removed += cur.rowcount
+    conn.close()
+    return removed
+
+def list_generations(limit: int = 100, offset: int = 0, search: str = None, favorites_only: bool = False, album_id: int = None):
+    conn = get_connection()
     params = []
+    if album_id:
+        query = """
+            SELECT g.* FROM generations g
+            INNER JOIN album_items ai ON g.job_id = ai.job_id
+            WHERE ai.album_id = ?
+        """
+        params.append(album_id)
+    else:
+        query = "SELECT g.* FROM generations g WHERE 1=1"
+
     if favorites_only:
-        query += " AND favorite = 1"
+        query += " AND g.favorite = 1"
     if search:
-        query += " AND (prompt LIKE ? OR model LIKE ?)"
+        query += " AND (g.prompt LIKE ? OR g.model LIKE ?)"
         params.extend([f"%{search}%", f"%{search}%"])
-    query += " ORDER BY id DESC LIMIT ? OFFSET ?"
+    query += " ORDER BY g.id DESC LIMIT ? OFFSET ?"
     params.extend([limit, offset])
     
     rows = conn.execute(query, params).fetchall()
@@ -250,6 +325,7 @@ def delete_generation(job_id: str):
                     os.remove(json_path)
             except Exception as e:
                 print(f"Error removing files: {e}")
+        conn.execute("DELETE FROM album_items WHERE job_id = ?", (job_id,))
         conn.execute("DELETE FROM generations WHERE job_id = ?", (job_id,))
     conn.close()
     return True
@@ -276,6 +352,7 @@ def batch_delete_generations(job_ids: list):
                         os.remove(json_path)
                 except Exception as e:
                     print(f"Error removing file {row['file_path']}: {e}")
+            conn.execute("DELETE FROM album_items WHERE job_id = ?", (job_id,))
             cur = conn.execute("DELETE FROM generations WHERE job_id = ?", (job_id,))
             deleted_count += cur.rowcount
     conn.close()

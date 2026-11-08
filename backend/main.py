@@ -115,6 +115,12 @@ class CharacterModel(BaseModel):
 class BatchGalleryRequest(BaseModel):
     job_ids: List[str]
 
+class CreateAlbumRequest(BaseModel):
+    name: str
+
+class AlbumItemsRequest(BaseModel):
+    job_ids: List[str]
+
 async def broadcast_state():
     if current_job["start_time"] > 0 and current_job["status"] in ["loading", "sampling", "decoding"]:
         current_job["elapsed"] = round(time.time() - current_job["start_time"], 1)
@@ -692,11 +698,42 @@ async def get_queue_status():
     }
 
 @app.get("/api/gallery")
-async def get_gallery(limit: int = 50, offset: int = 0, search: Optional[str] = None, favorites_only: bool = False):
-    items = database.list_generations(limit, offset, search, favorites_only)
+async def get_gallery(limit: int = 50, offset: int = 0, search: Optional[str] = None, favorites_only: bool = False, album_id: Optional[int] = None):
+    items = database.list_generations(limit, offset, search, favorites_only, album_id)
     for item in items:
         item["image_url"] = f"/api/outputs/{item['filename']}"
     return items
+
+@app.get("/api/albums")
+async def get_albums():
+    return database.list_albums()
+
+@app.post("/api/albums")
+async def create_new_album(req: CreateAlbumRequest):
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Album name cannot be empty")
+    album = database.create_album(name)
+    return album
+
+@app.delete("/api/albums/{album_id}")
+async def delete_existing_album(album_id: int):
+    database.delete_album(album_id)
+    return {"success": True}
+
+@app.post("/api/albums/{album_id}/add")
+async def add_images_to_album(album_id: int, req: AlbumItemsRequest):
+    if not req.job_ids:
+        raise HTTPException(status_code=400, detail="No images provided")
+    count = database.add_to_album(album_id, req.job_ids)
+    return {"success": True, "added_count": count}
+
+@app.post("/api/albums/{album_id}/remove")
+async def remove_images_from_album(album_id: int, req: AlbumItemsRequest):
+    if not req.job_ids:
+        raise HTTPException(status_code=400, detail="No images provided")
+    count = database.remove_from_album(album_id, req.job_ids)
+    return {"success": True, "removed_count": count}
 
 @app.post("/api/gallery/{job_id}/favorite")
 async def toggle_fav(job_id: str):

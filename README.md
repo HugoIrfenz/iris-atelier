@@ -50,11 +50,13 @@ Five character archetypes pre-configured with modular paragraph spacing (Quality
 - **Local Scanner**: One-click scanning of your Windows `Downloads` directory to import `.safetensors` and `.gguf` files into ComfyUI models storage.
 - **GGUF Quantization Support**: Optimized for ultra-fast 6-bit and 8-bit quantized UNet diffusion (such as Anima Turbo Q5_K_M).
 
-### 🗃️ 5. Gallery Management & Export
-- **Search & Filter**: Search prompts in real-time or filter by favorite status.
-- **Multi-Select & Bulk Actions**: Select all or individual images.
+### 🗃️ 5. Albums Categorization & Gallery Suite
+- **Non-Destructive Albums**: Select any number of images (`A B C D...`) and click **"Add to Album"** or **"Create New Album"**. Categorized images are indexed safely in SQLite many-to-many tables and always remain intact in your main archive.
+- **Album Filtering & Management**: Browse individual albums with dedicated filter pills and badge counts. Remove images from an album or delete albums without touching the underlying image files.
+- **Keyboard Arrow Shuffling (`<` and `>`)**: Seamlessly shuffle between renders using the keyboard `<` / `,` (Previous) and `>` / `.` (Next) or Left `◄` / Right `►` arrow keys. Automatically avoids interrupting active text inputs or prompt editing.
+- **Multi-Select & Bulk Actions**: Select all or individual images with visual checkboxes.
 - **1-Click ZIP Export**: Download selected renders as a single compressed `.zip` archive.
-- **Permanent Batch Delete**: Bulk delete unwanted renders from disk to reclaim storage.
+- **Permanent Batch Delete**: Bulk delete unwanted renders from disk and SQLite in one click to reclaim storage.
 
 ---
 
