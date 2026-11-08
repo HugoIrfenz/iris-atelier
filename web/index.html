@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Iris Atelier — Local AI Image Studio</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%238699b8'><path d='M12 2C8 6 4 10 4 15a8 8 0 0016 0c0-5-4-9-8-13z'/></svg>" />
+    <!-- Google Fonts: Cormorant Garamond & Plus Jakarta Sans -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Tailwind CSS CDN for instant styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              serif: ['"Cormorant Garamond"', 'Georgia', 'serif'],
+              sans: ['"Plus Jakarta Sans"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+            },
+            colors: {
+              atelier: {
+                bg: '#151821',
+                panel: '#1c212d',
+                card: '#222836',
+                cardHover: '#2a3243',
+                border: '#2e3748',
+                borderSubtle: '#262d3b',
+                moss: '#4d6b53',
+                mossHover: '#5c7f63',
+                mossDark: '#39503d',
+                iris: '#8699b8',
+                irisLight: '#a8bbdc',
+                irisDark: '#4b576d',
+                gold: '#c5a059',
+                goldLight: '#e4c47d',
+              },
+              civitai: {
+                dark: '#151821',
+                card: '#222836',
+                border: '#2e3748',
+                primary: '#4d6b53',
+                accent: '#8699b8',
+                hover: '#2a3243'
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      body {
+        font-family: 'Plus Jakarta Sans', sans-serif;
+      }
+      .font-atelier-title {
+        font-family: 'Cormorant Garamond', Georgia, serif;
+      }
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #151821;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #2e3748;
+        border-radius: 3px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #3d4a61;
+      }
+    </style>
+  </head>
+  <body class="bg-[#151821] text-slate-100 min-h-screen selection:bg-[#4d6b53] selection:text-white antialiased font-sans">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

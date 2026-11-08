@@ -1,0 +1,45 @@
+# Python & Virtual Environments
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.env
+.venv
+venv/
+ENV/
+
+# Node & Frontend Dependencies
+web/node_modules/
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local Studio Database & History
+gallery.db
+gallery.db-journal
+*.db
+*.db-wal
+*.db-shm
+
+# AI Models & Generated Outputs
+*.safetensors
+*.gguf
+*.bin
+*.onnx
+outputs/
+inputs/
+cache/
+logs/
+
+# Allow docs screenshots
+!docs/screenshots/*.jpg
+!docs/screenshots/*.png
+!studio_icon.ico
+
+# OS & Editor Files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

@@ -1,0 +1,173 @@
+{
+  "1": {
+    "inputs": {
+      "ckpt_name": "RealVisXL_V5_Lightning_Native_FP8.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "2": {
+    "inputs": {
+      "width": 768,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image"
+    }
+  },
+  "3": {
+    "inputs": {
+      "text": "RAW photo, a handsome 25 year old east asian man, athletic muscular build, wearing a red casual shirt, outdoors, soft lighting, 35mm photograph, 8k, sharp focus, skin pores",
+      "clip": [
+        "1",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Positive Prompt"
+    }
+  },
+  "4": {
+    "inputs": {
+      "text": "blurry, low quality, worst quality, deformed, bad anatomy, bad eyes, disfigured, cartoon, anime, 3d render, plastic skin",
+      "clip": [
+        "1",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Negative Prompt"
+    }
+  },
+  "10": {
+    "inputs": {
+      "image": "selfie.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Selfie"
+    }
+  },
+  "11": {
+    "inputs": {
+      "pulid_file": "ip-adapter_pulid_sdxl_fp16.safetensors"
+    },
+    "class_type": "PulidModelLoader",
+    "_meta": {
+      "title": "Load PuLID Model"
+    }
+  },
+  "12": {
+    "inputs": {
+      "provider": "CUDA"
+    },
+    "class_type": "PulidInsightFaceLoader",
+    "_meta": {
+      "title": "Load InsightFace (PuLID)"
+    }
+  },
+  "13": {
+    "inputs": {},
+    "class_type": "PulidEvaClipLoader",
+    "_meta": {
+      "title": "Load Eva Clip (PuLID)"
+    }
+  },
+  "14": {
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "pulid": [
+        "11",
+        0
+      ],
+      "eva_clip": [
+        "13",
+        0
+      ],
+      "face_analysis": [
+        "12",
+        0
+      ],
+      "image": [
+        "10",
+        0
+      ],
+      "method": "fidelity",
+      "weight": 0.85,
+      "start_at": 0.0,
+      "end_at": 1.0
+    },
+    "class_type": "ApplyPulid",
+    "_meta": {
+      "title": "Apply PuLID"
+    }
+  },
+  "5": {
+    "inputs": {
+      "seed": 42,
+      "steps": 6,
+      "cfg": 1.8,
+      "sampler_name": "dpmpp_sde",
+      "scheduler": "sgm_uniform",
+      "denoise": 1.0,
+      "model": [
+        "14",
+        0
+      ],
+      "positive": [
+        "3",
+        0
+      ],
+      "negative": [
+        "4",
+        0
+      ],
+      "latent_image": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "6": {
+    "inputs": {
+      "samples": [
+        "5",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "7": {
+    "inputs": {
+      "filename_prefix": "PersonaRealism",
+      "images": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  }
+}
