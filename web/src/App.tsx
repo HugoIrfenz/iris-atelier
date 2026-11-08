@@ -45,7 +45,8 @@ import {
   Eye,
   ListOrdered,
   Folder,
-  FolderCheck
+  FolderCheck,
+  Camera
 } from 'lucide-react'
 
 interface Album {
@@ -327,6 +328,12 @@ export default function App() {
   const [albumFeedbackMsg, setAlbumFeedbackMsg] = useState('')
   const [targetJobIdsForAlbum, setTargetJobIdsForAlbum] = useState<string[]>([])
 
+  // Angle & Pose Burst Matrix state (10, 50, 100 only)
+  const [showAngleBurstModal, setShowAngleBurstModal] = useState(false)
+  const [burstCount, setBurstCount] = useState<10 | 50 | 100>(100)
+  const [burstAlbumName, setBurstAlbumName] = useState('')
+  const [isQueueingBurst, setIsQueueingBurst] = useState(false)
+
   // Modals
   const [showShutdownModal, setShowShutdownModal] = useState(false)
   const [isShutDown, setIsShutDown] = useState(false)
@@ -456,6 +463,7 @@ export default function App() {
   const loadGallery = async () => {
     try {
       const params = new URLSearchParams()
+      params.append('limit', '500')
       if (gallerySearch) params.append('search', gallerySearch)
       if (favoritesOnly) params.append('favorites_only', 'true')
       if (selectedAlbumId !== null) params.append('album_id', selectedAlbumId.toString())
@@ -801,6 +809,56 @@ export default function App() {
       handleGenerateSingle()
     } else {
       handleGenerateMulti()
+    }
+  }
+
+  // Launch Pose & Angle Burst Matrix (10, 50, 100 Shots)
+  const handleLaunchAngleBurst = async () => {
+    const currentPrompt = generationMode === 'single' ? prompt : multiPrompts[activeSlotIndex] || prompt
+    if (!currentPrompt.trim()) {
+      alert('Please enter or select a character prompt first.')
+      return
+    }
+
+    try {
+      setIsQueueingBurst(true)
+      const payload = {
+        prompt: currentPrompt.trim(),
+        negative_prompt: negativePrompt,
+        model,
+        aspect_ratio: aspectRatio,
+        width,
+        height,
+        steps,
+        cfg,
+        sampler,
+        scheduler,
+        seed: randomSeed ? -1 : seed,
+        burst_count: burstCount,
+        album_name: burstAlbumName.trim() || undefined
+      }
+
+      const res = await fetch('/api/generate-pose-burst', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        setShowAngleBurstModal(false)
+        setActiveTab('canvas')
+        loadAlbums()
+        loadGallery()
+        alert(`Queued ${data.burst_count} sequential angle & pose shots in album "${data.album_name}"!`)
+      } else {
+        const err = await res.json()
+        alert('Failed to launch angle burst: ' + (err.detail || 'Unknown error'))
+      }
+    } catch (e: any) {
+      alert('Error launching angle burst: ' + e.message)
+    } finally {
+      setIsQueueingBurst(false)
     }
   }
 
@@ -2046,20 +2104,41 @@ export default function App() {
                 </div>
               </div>
             ) : (
-              <button
-                type="button"
-                onClick={generationMode === 'single' ? handleGenerateSingle : handleGenerateMulti}
-                className="w-full py-3.5 px-4 rounded-xl bg-[#4d6b53] hover:bg-[#5c7f63] text-white font-semibold text-sm shadow-lg shadow-[#4d6b53]/25 flex items-center justify-center gap-2 transition active:scale-[0.99] border border-[#5c7f63]/50"
-              >
-                <Sparkles className="w-4 h-4 text-emerald-200" />
-                <span>
-                  {generationMode === 'single'
-                    ? batchCount === 1
-                      ? 'Generate Image'
-                      : `Queue ${batchCount} Images (Sequential)`
-                    : `Queue ${multiPrompts.filter((p) => p.trim()).length} Prompts (Sequential)`}
-                </span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={generationMode === 'single' ? handleGenerateSingle : handleGenerateMulti}
+                  className="flex-1 py-3.5 px-4 rounded-xl bg-[#4d6b53] hover:bg-[#5c7f63] text-white font-semibold text-sm shadow-lg shadow-[#4d6b53]/25 flex items-center justify-center gap-2 transition active:scale-[0.99] border border-[#5c7f63]/50"
+                >
+                  <Sparkles className="w-4 h-4 text-emerald-200" />
+                  <span>
+                    {generationMode === 'single'
+                      ? batchCount === 1
+                        ? 'Generate Image'
+                        : `Queue ${batchCount} Images (Sequential)`
+                      : `Queue ${multiPrompts.filter((p) => p.trim()).length} Prompts (Sequential)`}
+                  </span>
+                </button>
+
+                {/* Disguised Angle & Pose Matrix Trigger Icon */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const currentPrompt = generationMode === 'single' ? prompt : multiPrompts[activeSlotIndex] || prompt
+                    const firstFew = currentPrompt.trim().split(/\s+/).slice(0, 3).join(' ').replace(/[,.]/g, '')
+                    setBurstAlbumName(`${firstFew || 'Character'} - ${burstCount} Angles`)
+                    setShowAngleBurstModal(true)
+                  }}
+                  className="h-[48px] px-3.5 rounded-xl bg-[#222836] hover:bg-[#2a3243] text-indigo-300 hover:text-white border border-[#2e3748] hover:border-indigo-400/50 transition shadow-md flex items-center justify-center group relative"
+                  title="Angle & Pose Matrix (10, 50, 100 Shots)"
+                >
+                  <Camera className="w-5 h-5 text-indigo-300 group-hover:scale-110 transition duration-200" />
+                  <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-indigo-500"></span>
+                  </span>
+                </button>
+              </div>
             )}
           </div>
         </aside>
@@ -3415,6 +3494,129 @@ export default function App() {
               >
                 <FolderCheck className="w-3.5 h-3.5" />
                 <span>Create Album</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Angle & Pose Matrix Modal (10, 50, 100 Shots Only) */}
+      {showAngleBurstModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#1c212d] border border-[#2e3748] rounded-2xl max-w-lg w-full p-6 shadow-2xl">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-[#262d3b] mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 flex items-center justify-center shadow-inner">
+                  <Camera className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-serif font-bold text-lg text-white">Angle & Pose Matrix</h3>
+                  <p className="text-[11px] text-slate-400">
+                    Automated multi-angle photoshoot (poses & camera angles only)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAngleBurstModal(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-[#222836] transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Base Prompt Preview Card */}
+            <div className="mb-4 bg-[#151821] p-3 rounded-xl border border-[#262d3b]">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                  Base Character & Scene Prompt
+                </span>
+                <span className="text-[10px] text-emerald-400 font-mono">Zero Place Interference</span>
+              </div>
+              <p className="text-xs text-slate-300 line-clamp-2 italic">
+                {generationMode === 'single' ? prompt : multiPrompts[activeSlotIndex] || prompt}
+              </p>
+            </div>
+
+            {/* Shot Count Selection (10, 50, 100 only) */}
+            <div className="mb-5">
+              <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-2">
+                Select Shot Count
+              </label>
+              <div className="grid grid-cols-3 gap-3">
+                {[
+                  { count: 10 as const, title: '10 Shots', desc: 'Quick Preview', time: '~2.5m' },
+                  { count: 50 as const, title: '50 Shots', desc: 'Extended Reel', time: '~12m' },
+                  { count: 100 as const, title: '100 Shots', desc: 'Master Matrix', time: '~25m' },
+                ].map((opt) => (
+                  <button
+                    key={opt.count}
+                    type="button"
+                    onClick={() => {
+                      setBurstCount(opt.count)
+                      const currentPrompt = generationMode === 'single' ? prompt : multiPrompts[activeSlotIndex] || prompt
+                      const firstFew = currentPrompt.trim().split(/\s+/).slice(0, 3).join(' ').replace(/[,.]/g, '')
+                      setBurstAlbumName(`${firstFew || 'Character'} - ${opt.count} Angles`)
+                    }}
+                    className={`p-3 rounded-xl border text-center transition flex flex-col items-center justify-center ${
+                      burstCount === opt.count
+                        ? 'bg-[#4d6b53]/20 border-[#4d6b53] ring-1 ring-[#4d6b53] text-white shadow-md'
+                        : 'bg-[#151821] border-[#262d3b] text-slate-400 hover:text-white hover:bg-[#222836]'
+                    }`}
+                  >
+                    <span className="font-serif font-bold text-base block mb-0.5">{opt.title}</span>
+                    <span className="text-[10px] text-slate-400 block mb-1">{opt.desc}</span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-black/40 text-emerald-300 font-mono">
+                      {opt.time}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Album Name Input */}
+            <div className="mb-5">
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                  Target Album Name
+                </label>
+                <span className="text-[10px] text-slate-400">Available in normal gallery too</span>
+              </div>
+              <input
+                type="text"
+                value={burstAlbumName}
+                onChange={(e) => setBurstAlbumName(e.target.value)}
+                placeholder="e.g. Zaria - 100 Angles"
+                className="w-full bg-[#151821] border border-[#262d3b] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#8699b8] transition"
+              />
+            </div>
+
+            {/* Hardware Safety Notice */}
+            <div className="mb-6 p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 text-slate-300 text-[11px] leading-relaxed flex items-start gap-2.5">
+              <Sparkles className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+              <span>
+                <strong>Sequential Queue Safety:</strong> All {burstCount} angle variations will render strictly one-by-one through ComfyUI, keeping GPU VRAM at safe levels (~3.2 GB on RTX 3050). You can cancel at any time.
+              </span>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setShowAngleBurstModal(false)}
+                className="flex-1 py-2.5 rounded-xl bg-[#222836] hover:bg-[#2a3243] text-slate-300 text-xs font-medium border border-[#2e3748] transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleLaunchAngleBurst}
+                disabled={isQueueingBurst}
+                className="flex-1 py-2.5 rounded-xl bg-[#4d6b53] hover:bg-[#5c7f63] text-white text-xs font-semibold shadow-lg shadow-[#4d6b53]/25 flex items-center justify-center gap-2 transition disabled:opacity-50"
+              >
+                <Camera className="w-3.5 h-3.5" />
+                <span>{isQueueingBurst ? 'Queueing Shots...' : `Queue ${burstCount} Angles & Poses`}</span>
               </button>
             </div>
           </div>

@@ -21,6 +21,7 @@ import websockets
 
 import database
 import downloader
+from pose_library import get_pose_burst_modifiers
 
 COMFY_HTTP = "http://127.0.0.1:8188"
 COMFY_WS = "ws://127.0.0.1:8188/ws"
@@ -92,6 +93,22 @@ class MultiPromptRequest(BaseModel):
     sampler: Optional[str] = "euler"
     scheduler: Optional[str] = "sgm_uniform"
     seed: Optional[int] = -1
+
+class PoseBurstRequest(BaseModel):
+    prompt: str
+    negative_prompt: Optional[str] = "worst quality, low quality, blurry, deformed"
+    model: Optional[str] = "anima-turbo-v1.1-Q5_K_M.gguf"
+    aspect_ratio: Optional[str] = "Portrait"
+    width: Optional[int] = 768
+    height: Optional[int] = 1152
+    steps: Optional[int] = 8
+    cfg: Optional[float] = 1.0
+    sampler: Optional[str] = "euler"
+    scheduler: Optional[str] = "sgm_uniform"
+    seed: Optional[int] = -1
+    burst_count: int = 100
+    album_name: Optional[str] = None
+    album_id: Optional[int] = None
 
 class LocalImportRequest(BaseModel):
     source_path: str
@@ -646,6 +663,131 @@ async def generate_multiprompt(req: MultiPromptRequest):
         "queue_size": len(pending_queue)
     }
 
+@app.post("/api/generate-pose-burst")
+async def generate_pose_burst(req: PoseBurstRequest):
+    import random
+    base_prompt = req.prompt.strip()
+    if not base_prompt:
+        raise HTTPException(status_code=400, detail="Base prompt is required.")
+
+    # Clamp burst_count strictly to 10, 50, or 100
+    if req.burst_count <= 10:
+        count = 10
+    elif req.burst_count <= 50:
+        count = 50
+    else:
+        count = 100
+
+    modifiers = get_pose_burst_modifiers(count)
+
+    # Resolve or create album
+    album_id = req.album_id
+    album_name = req.album_name
+    if not album_id:
+        if not album_name or not album_name.strip():
+            # Clean character/prompt name for album title
+            first_words = " ".join(base_prompt.split()[:4]).replace(",", "")
+            album_name = f"{first_words} - {count} Angles"
+        created_alb = database.create_album(album_name.strip())
+        album_id = created_alb["id"]
+        album_name = created_alb["name"]
+
+    base_seed = req.seed if (req.seed is not None and req.seed >= 0) else None
+
+    # Determine workflow template based on model type
+    is_gguf = req.model.endswith(".gguf") or "Q5" in req.model or "Q4" in req.model
+    workflow_path = WORKFLOW_GGUF if is_gguf else WORKFLOW_CHECKPOINT
+    
+    with open(workflow_path, "r", encoding="utf-8") as f:
+        base_wf = json.load(f)
+
+    created_jobs = []
+    job_ids_for_album = []
+    for i, mod in enumerate(modifiers):
+        job_id = str(uuid.uuid4())
+        job_ids_for_album.append(job_id)
+        if base_seed is None:
+            job_seed = random.randint(1, 9999999999)
+        else:
+            job_seed = base_seed + i
+
+        # Combine cleanly: base prompt + angle modifier
+        clean_base = base_prompt.rstrip(", ")
+        combined_prompt = f"{clean_base}, {mod['prompt']}"
+
+        wf = json.loads(json.dumps(base_wf))
+        if is_gguf:
+            wf["1"]["inputs"]["unet_name"] = req.model
+            wf["4"]["inputs"]["width"] = req.width
+            wf["4"]["inputs"]["height"] = req.height
+            wf["5"]["inputs"]["text"] = combined_prompt
+            wf["6"]["inputs"]["text"] = req.negative_prompt
+            wf["7"]["inputs"]["seed"] = job_seed
+            wf["7"]["inputs"]["steps"] = req.steps
+            wf["7"]["inputs"]["cfg"] = req.cfg
+            wf["7"]["inputs"]["sampler_name"] = req.sampler
+            wf["7"]["inputs"]["scheduler"] = req.scheduler
+        else:
+            wf["1"]["inputs"]["ckpt_name"] = req.model
+            wf["2"]["inputs"]["width"] = req.width
+            wf["2"]["inputs"]["height"] = req.height
+            wf["3"]["inputs"]["text"] = combined_prompt
+            wf["4"]["inputs"]["text"] = req.negative_prompt
+            wf["5"]["inputs"]["seed"] = job_seed
+            wf["5"]["inputs"]["steps"] = req.steps
+            wf["5"]["inputs"]["cfg"] = req.cfg
+            wf["5"]["inputs"]["sampler_name"] = req.sampler
+            wf["5"]["inputs"]["scheduler"] = req.scheduler
+
+        meta = {
+            "job_id": job_id,
+            "prompt": combined_prompt,
+            "negative_prompt": req.negative_prompt,
+            "model": req.model,
+            "aspect_ratio": req.aspect_ratio,
+            "width": req.width,
+            "height": req.height,
+            "steps": req.steps,
+            "cfg": req.cfg,
+            "sampler": req.sampler,
+            "scheduler": req.scheduler,
+            "seed": job_seed,
+            "favorite": 0,
+            "album_id": album_id
+        }
+
+        job_item = {
+            "job_id": job_id,
+            "workflow": wf,
+            "seed": job_seed,
+            "steps": req.steps,
+            "batch_index": i + 1,
+            "batch_total": len(modifiers),
+            "metadata": meta
+        }
+        pending_queue.append(job_item)
+        created_jobs.append({"job_id": job_id, "seed": job_seed, "pose": mod["name"]})
+
+    # Associate job IDs with the album right away
+    if album_id and job_ids_for_album:
+        database.add_to_album(album_id, job_ids_for_album)
+
+    current_job["queue_size"] = len(pending_queue)
+    current_job["queue_items"] = [
+        {"job_id": q["job_id"], "seed": q["seed"], "index": q["batch_index"], "total": q["batch_total"], "prompt": q["metadata"]["prompt"][:35]}
+        for q in pending_queue
+    ]
+    await broadcast_state()
+
+    return {
+        "status": "queued",
+        "burst_count": len(modifiers),
+        "album_id": album_id,
+        "album_name": album_name,
+        "jobs": created_jobs,
+        "queue_size": len(pending_queue)
+    }
+
 @app.post("/api/cancel")
 async def cancel_job():
     """Cancels the active job and allows queue worker to proceed to next item."""
@@ -698,7 +840,7 @@ async def get_queue_status():
     }
 
 @app.get("/api/gallery")
-async def get_gallery(limit: int = 50, offset: int = 0, search: Optional[str] = None, favorites_only: bool = False, album_id: Optional[int] = None):
+async def get_gallery(limit: int = 500, offset: int = 0, search: Optional[str] = None, favorites_only: bool = False, album_id: Optional[int] = None):
     items = database.list_generations(limit, offset, search, favorites_only, album_id)
     for item in items:
         item["image_url"] = f"/api/outputs/{item['filename']}"

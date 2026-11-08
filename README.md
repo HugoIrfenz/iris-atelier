@@ -50,13 +50,21 @@ Five character archetypes pre-configured with modular paragraph spacing (Quality
 - **Local Scanner**: One-click scanning of your Windows `Downloads` directory to import `.safetensors` and `.gguf` files into ComfyUI models storage.
 - **GGUF Quantization Support**: Optimized for ultra-fast 6-bit and 8-bit quantized UNet diffusion (such as Anima Turbo Q5_K_M).
 
-### 🗃️ 5. Albums Categorization & Gallery Suite
+### 🗃️ 5. Albums Categorization & Gallery Suite (500+ Cap)
 - **Non-Destructive Albums**: Select any number of images (`A B C D...`) and click **"Add to Album"** or **"Create New Album"**. Categorized images are indexed safely in SQLite many-to-many tables and always remain intact in your main archive.
 - **Album Filtering & Management**: Browse individual albums with dedicated filter pills and badge counts. Remove images from an album or delete albums without touching the underlying image files.
+- **500+ Image Archive Scale**: Gallery capacity expanded beyond the default 50-image threshold, allowing smooth browsing of expansive render histories and burst archives.
 - **Keyboard Arrow Shuffling (`<` and `>`)**: Seamlessly shuffle between renders using the keyboard `<` / `,` (Previous) and `>` / `.` (Next) or Left `◄` / Right `►` arrow keys. Automatically avoids interrupting active text inputs or prompt editing.
 - **Multi-Select & Bulk Actions**: Select all or individual images with visual checkboxes.
 - **1-Click ZIP Export**: Download selected renders as a single compressed `.zip` archive.
 - **Permanent Batch Delete**: Bulk delete unwanted renders from disk and SQLite in one click to reclaim storage.
+
+### 📸 6. Angle & Pose Matrix (10, 50, 100 Burst)
+- **Disguised Quick Action Trigger**: A sleek camera icon integrated directly alongside the main Generate button with live status indicator.
+- **Pure Angles & Poses (Zero-Place Interference)**: Injects 100 curated camera perspectives, framing angles, and physical postures (squatting, seiza kneeling, lying on stomach, Dutch tilts, worm's-eye, bird's-eye) without any location or furniture conflicts—preserving your exact character and background prompts.
+- **Configurable Burst Counts**: Choose between **10 Shots** (Quick Preview), **50 Shots** (Extended Reel), or **100 Shots** (Master Matrix).
+- **Automated Album Grouping**: Automatically creates and links an album (e.g., `Zaria - 100 Angles`) while simultaneously keeping every render available in the normal atelier gallery.
+- **VRAM Hardware Safety**: Sequentially queues all jobs through the single-runner queue, preventing OOM crashes on 4GB VRAM hardware.
 
 ---
 

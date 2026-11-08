@@ -223,6 +223,11 @@ def save_generation(data: dict):
             "created_at": data.get("created_at", datetime.now().isoformat()),
             "favorite": 1 if data.get("favorite") else 0
         })
+        if data.get("album_id") and data.get("job_id"):
+            conn.execute(
+                "INSERT OR IGNORE INTO album_items (album_id, job_id, added_at) VALUES (?, ?, ?)",
+                (data["album_id"], data["job_id"], datetime.now().isoformat())
+            )
     conn.close()
 
 def list_albums():
@@ -276,7 +281,7 @@ def remove_from_album(album_id: int, job_ids: list):
     conn.close()
     return removed
 
-def list_generations(limit: int = 100, offset: int = 0, search: str = None, favorites_only: bool = False, album_id: int = None):
+def list_generations(limit: int = 500, offset: int = 0, search: str = None, favorites_only: bool = False, album_id: int = None):
     conn = get_connection()
     params = []
     if album_id:
