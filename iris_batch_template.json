@@ -1,0 +1,45 @@
+{
+  "album_name": "Atelier Concept Showcase",
+  "defaults": {
+    "model": "anima-turbo-v1.1-Q5_K_M.gguf",
+    "negative_prompt": "worst quality, low quality, blurry, deformed, bad anatomy",
+    "aspect_ratio": "Portrait (2:3)",
+    "width": 768,
+    "height": 1152,
+    "steps": 8,
+    "cfg": 1.0,
+    "sampler": "euler",
+    "scheduler": "sgm_uniform"
+  },
+  "generations": [
+    {
+      "prompt": "masterpiece, best quality, 1girl, Zaria, cyan hair, heterochromia, walking toward camera, dynamic fashion pose, white background",
+      "aspect_ratio": "Portrait (2:3)",
+      "seed": -1
+    },
+    {
+      "prompt": "masterpiece, best quality, 1girl, Nixia, silver hair, purple highlights, gothic corset, deep flat-footed squat, white background",
+      "aspect_ratio": "Portrait (2:3)",
+      "seed": -1
+    },
+    {
+      "prompt": "masterpiece, best quality, 1girl, Angela, light blue bob, amber eyes, lab coat, sitting upright with arms crossed, luxury modern office background",
+      "aspect_ratio": "Landscape (3:2)",
+      "width": 1152,
+      "height": 768,
+      "seed": -1
+    },
+    {
+      "prompt": "masterpiece, best quality, 1girl, Virelia, gentle maid, pink twin hair, kneeling seiza formal posture, cozy cafe interior, soft warm sunshine",
+      "aspect_ratio": "Portrait (2:3)",
+      "seed": -1
+    },
+    {
+      "prompt": "masterpiece, best quality, 1woman, Vivianne, tall mature kuudere, silver-white hair, lying on back looking at camera, inverted angle, white background",
+      "aspect_ratio": "Square (1:1)",
+      "width": 896,
+      "height": 896,
+      "seed": -1
+    }
+  ]
+}

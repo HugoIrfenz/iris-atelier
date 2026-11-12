@@ -66,6 +66,13 @@ Five character archetypes pre-configured with modular paragraph spacing (Quality
 - **Automated Album Grouping**: Automatically creates and links an album (e.g., `Zaria - 100 Angles`) while simultaneously keeping every render available in the normal atelier gallery.
 - **VRAM Hardware Safety**: Sequentially queues all jobs through the single-runner queue, preventing OOM crashes on 4GB VRAM hardware.
 
+### 📜 7. JSON to Generate (Batch Preset Runner)
+- **Import & Detect**: Import any `.json` file or paste JSON definitions. The system automatically detects the number of generations, validates prompt integrity, and displays a card preview for each queued item.
+- **Downloadable Template**: 1-click download of `iris_batch_template.json` pre-configured with curated character prompts and parameter overrides.
+- **Flexible Schema with Shared Defaults**: Define global defaults (`model`, `steps`, `cfg`, `dimensions`, `sampler`) and easily override individual items with custom aspect ratios, seeds, or prompts.
+- **Album Integration**: Automatically groups the imported batch into an album (e.g., `Atelier Concept Showcase`) while preserving full availability in the main gallery.
+- **Queue Protection**: Executes sequentially through the single-runner engine without VRAM spikes on 4GB GPUs.
+
 ---
 
 ## 🏗️ Architecture

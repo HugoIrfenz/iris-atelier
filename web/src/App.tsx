@@ -46,7 +46,9 @@ import {
   ListOrdered,
   Folder,
   FolderCheck,
-  Camera
+  Camera,
+  FileCode,
+  Upload
 } from 'lucide-react'
 
 interface Album {
@@ -257,8 +259,8 @@ interface SystemStatus {
 }
 
 export default function App() {
-  // Generation Mode: Single Prompt vs Multiprompt Queue (1-10)
-  const [generationMode, setGenerationMode] = useState<'single' | 'multiprompt'>('single')
+  // Generation Mode: Single Prompt vs Multiprompt Queue (1-10) vs JSON to Generate
+  const [generationMode, setGenerationMode] = useState<'single' | 'multiprompt' | 'json_batch'>('single')
 
   // Single mode prompt state
   const [prompt, setPrompt] = useState(DEFAULT_CHARACTERS[0].prompt)
@@ -333,6 +335,15 @@ export default function App() {
   const [burstCount, setBurstCount] = useState<10 | 50 | 100>(100)
   const [burstAlbumName, setBurstAlbumName] = useState('')
   const [isQueueingBurst, setIsQueueingBurst] = useState(false)
+
+  // JSON Batch Generation state
+  const [jsonBatchRaw, setJsonBatchRaw] = useState<string>('')
+  const [jsonBatchParsed, setJsonBatchParsed] = useState<any>(null)
+  const [jsonBatchError, setJsonBatchError] = useState<string>('')
+  const [jsonBatchAlbumName, setJsonBatchAlbumName] = useState<string>('Atelier Concept Showcase')
+  const [jsonBatchGenerations, setJsonBatchGenerations] = useState<any[]>([])
+  const [isQueueingJsonBatch, setIsQueueingJsonBatch] = useState<boolean>(false)
+  const [jsonBatchInputMode, setJsonBatchInputMode] = useState<'upload' | 'paste'>('upload')
 
   // Modals
   const [showShutdownModal, setShowShutdownModal] = useState(false)
@@ -807,8 +818,10 @@ export default function App() {
     setRandomSeed(true)
     if (generationMode === 'single') {
       handleGenerateSingle()
-    } else {
+    } else if (generationMode === 'multiprompt') {
       handleGenerateMulti()
+    } else {
+      handleGenerateJsonBatch()
     }
   }
 
@@ -859,6 +872,178 @@ export default function App() {
       alert('Error launching angle burst: ' + e.message)
     } finally {
       setIsQueueingBurst(false)
+    }
+  }
+
+  // JSON Batch Helpers
+  const parseJsonBatch = (rawText: string) => {
+    setJsonBatchRaw(rawText)
+    setJsonBatchError('')
+    if (!rawText.trim()) {
+      setJsonBatchParsed(null)
+      setJsonBatchGenerations([])
+      return
+    }
+    try {
+      const parsed = JSON.parse(rawText)
+      setJsonBatchParsed(parsed)
+
+      let gens: any[] = []
+      if (Array.isArray(parsed)) {
+        gens = parsed
+      } else if (Array.isArray(parsed.generations)) {
+        gens = parsed.generations
+      } else if (Array.isArray(parsed.jobs)) {
+        gens = parsed.jobs
+      } else if (Array.isArray(parsed.items)) {
+        gens = parsed.items
+      } else {
+        setJsonBatchError('JSON must contain a "generations" or "jobs" array, or be an array of objects.')
+        setJsonBatchGenerations([])
+        return
+      }
+
+      const validGens = gens.filter((g) => g && typeof g.prompt === 'string' && g.prompt.trim())
+      if (validGens.length === 0) {
+        setJsonBatchError('No valid items with non-empty "prompt" found in JSON.')
+        setJsonBatchGenerations([])
+        return
+      }
+
+      setJsonBatchGenerations(validGens)
+      if (parsed.album_name && typeof parsed.album_name === 'string') {
+        setJsonBatchAlbumName(parsed.album_name)
+      } else if (!jsonBatchAlbumName || jsonBatchAlbumName === 'Atelier Concept Showcase') {
+        setJsonBatchAlbumName(`JSON Batch - ${validGens.length} Generations`)
+      }
+    } catch (e: any) {
+      setJsonBatchError(e.message || 'Invalid JSON syntax.')
+      setJsonBatchGenerations([])
+    }
+  }
+
+  const handleJsonFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      const content = event.target?.result as string
+      parseJsonBatch(content)
+    }
+    reader.readAsText(file)
+  }
+
+  const handleDownloadTemplate = () => {
+    const templateData = {
+      album_name: "Atelier Concept Showcase",
+      defaults: {
+        model: "anima-turbo-v1.1-Q5_K_M.gguf",
+        negative_prompt: "worst quality, low quality, blurry, deformed, bad anatomy",
+        aspect_ratio: "Portrait (2:3)",
+        width: 768,
+        height: 1152,
+        steps: 8,
+        cfg: 1.0,
+        sampler: "euler",
+        scheduler: "sgm_uniform"
+      },
+      generations: [
+        {
+          prompt: "masterpiece, best quality, 1girl, Zaria, cyan hair, heterochromia, walking toward camera, dynamic fashion pose, white background",
+          aspect_ratio: "Portrait (2:3)",
+          seed: -1
+        },
+        {
+          prompt: "masterpiece, best quality, 1girl, Nixia, silver hair, purple highlights, gothic corset, deep flat-footed squat, white background",
+          aspect_ratio: "Portrait (2:3)",
+          seed: -1
+        },
+        {
+          prompt: "masterpiece, best quality, 1girl, Angela, light blue bob, amber eyes, lab coat, sitting upright with arms crossed, luxury modern office background",
+          aspect_ratio: "Landscape (3:2)",
+          width: 1152,
+          height: 768,
+          seed: -1
+        },
+        {
+          prompt: "masterpiece, best quality, 1girl, Virelia, gentle maid, pink twin hair, kneeling seiza formal posture, cozy cafe interior, soft warm sunshine",
+          aspect_ratio: "Portrait (2:3)",
+          seed: -1
+        },
+        {
+          prompt: "masterpiece, best quality, 1woman, Vivianne, tall mature kuudere, silver-white hair, lying on back looking at camera, inverted angle, white background",
+          aspect_ratio: "Square (1:1)",
+          width: 896,
+          height: 896,
+          seed: -1
+        }
+      ]
+    }
+    const blob = new Blob([JSON.stringify(templateData, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'iris_batch_template.json'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleLoadSampleJson = async () => {
+    try {
+      const res = await fetch('/api/template/batch-json')
+      if (res.ok) {
+        const data = await res.json()
+        parseJsonBatch(JSON.stringify(data, null, 2))
+      }
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
+  const handleGenerateJsonBatch = async () => {
+    if (jsonBatchGenerations.length === 0) {
+      alert('Please import or paste a valid JSON batch containing at least 1 generation.')
+      return
+    }
+
+    try {
+      setIsQueueingJsonBatch(true)
+      const payload = {
+        album_name: jsonBatchAlbumName.trim() || undefined,
+        defaults: jsonBatchParsed?.defaults || {
+          model,
+          negative_prompt: negativePrompt,
+          aspect_ratio: aspectRatio,
+          width,
+          height,
+          steps,
+          cfg,
+          sampler,
+          scheduler
+        },
+        generations: jsonBatchGenerations
+      }
+
+      const res = await fetch('/api/generate-batch-json', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        setActiveTab('canvas')
+        loadAlbums()
+        loadGallery()
+        alert(`Queued ${data.batch_count} sequential generations from JSON into album "${data.album_name}"!`)
+      } else {
+        const err = await res.json()
+        alert('Failed to launch JSON batch: ' + (err.detail || 'Unknown error'))
+      }
+    } catch (e: any) {
+      alert('Error launching JSON batch: ' + e.message)
+    } finally {
+      setIsQueueingJsonBatch(false)
     }
   }
 
@@ -1523,15 +1708,19 @@ export default function App() {
               </div>
             </div>
 
-            {/* Mode Switcher: Single Prompt vs Multiprompt Queue */}
+            {/* Mode Switcher: Single Prompt vs Multiprompt Queue vs JSON Batch */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="text-xs font-semibold text-slate-300">Generation Mode</label>
                 <span className="text-[10px] text-slate-400">
-                  {generationMode === 'single' ? 'Single Prompt' : `${multiPrompts.length}/10 Queued Prompts`}
+                  {generationMode === 'single'
+                    ? 'Single Prompt'
+                    : generationMode === 'multiprompt'
+                    ? `${multiPrompts.length}/10 Queued Prompts`
+                    : `${jsonBatchGenerations.length} Detected from JSON`}
                 </span>
               </div>
-              <div className="grid grid-cols-2 p-1 rounded-xl bg-[#151821] border border-[#262d3b] gap-1">
+              <div className="grid grid-cols-3 p-1 rounded-xl bg-[#151821] border border-[#262d3b] gap-1">
                 <button
                   type="button"
                   onClick={() => setGenerationMode('single')}
@@ -1542,7 +1731,7 @@ export default function App() {
                   }`}
                 >
                   <Sparkles className="w-3.5 h-3.5 text-[#8699b8]" />
-                  <span>Single Prompt</span>
+                  <span>Single</span>
                 </button>
                 <button
                   type="button"
@@ -1554,7 +1743,24 @@ export default function App() {
                   }`}
                 >
                   <ListOrdered className="w-3.5 h-3.5 text-[#a3c9aa]" />
-                  <span>Multiprompt (Queue)</span>
+                  <span>Multi (10)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGenerationMode('json_batch')
+                    if (!jsonBatchRaw) {
+                      handleLoadSampleJson()
+                    }
+                  }}
+                  className={`py-1.5 text-xs font-medium rounded-lg transition flex items-center justify-center gap-1.5 ${
+                    generationMode === 'json_batch'
+                      ? 'bg-[#222836] text-white shadow-sm border border-[#2e3748]'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <FileCode className="w-3.5 h-3.5 text-amber-400" />
+                  <span>JSON Batch</span>
                 </button>
               </div>
             </div>
@@ -1671,7 +1877,7 @@ export default function App() {
                   className="w-full bg-[#151821] border border-[#262d3b] rounded-xl p-3 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-[#8699b8] transition resize-y min-h-[160px] leading-relaxed shadow-inner"
                 />
               </div>
-            ) : (
+            ) : generationMode === 'multiprompt' ? (
               /* Multiprompt Mode (Up to 10 sequential prompt slots A-J) */
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
@@ -1767,6 +1973,159 @@ export default function App() {
                     <Plus className="w-3.5 h-3.5 text-[#8699b8]" />
                     <span>+ Add Next Prompt Slot ({multiPrompts.length + 1}/10)</span>
                   </button>
+                )}
+              </div>
+            ) : (
+              /* JSON Batch Mode Panel */
+              <div className="space-y-3">
+                {/* Header Actions: Template Download & Sample */}
+                <div className="flex items-center justify-between pb-1 border-b border-[#262d3b]">
+                  <div className="flex items-center gap-1.5">
+                    <FileCode className="w-4 h-4 text-amber-400" />
+                    <span className="text-xs font-semibold text-slate-200">Import Batch JSON</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={handleLoadSampleJson}
+                      className="text-[10px] text-slate-400 hover:text-white px-2 py-0.5 rounded bg-[#1c212d] hover:bg-[#222836] border border-[#2e3748] transition"
+                    >
+                      Load Sample
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDownloadTemplate}
+                      className="text-[10px] text-amber-300 hover:text-amber-200 px-2.5 py-0.5 rounded bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 flex items-center gap-1 transition"
+                      title="Download iris_batch_template.json"
+                    >
+                      <FileDown className="w-3 h-3" />
+                      <span>Template</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Sub-mode Switcher: Upload File vs Paste JSON */}
+                <div className="flex rounded-lg bg-[#151821] p-0.5 border border-[#262d3b] text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setJsonBatchInputMode('upload')}
+                    className={`flex-1 py-1 rounded text-center transition flex items-center justify-center gap-1.5 ${
+                      jsonBatchInputMode === 'upload'
+                        ? 'bg-[#222836] text-white shadow-sm font-medium'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Upload className="w-3 h-3" />
+                    <span>Upload .json File</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setJsonBatchInputMode('paste')}
+                    className={`flex-1 py-1 rounded text-center transition flex items-center justify-center gap-1.5 ${
+                      jsonBatchInputMode === 'paste'
+                        ? 'bg-[#222836] text-white shadow-sm font-medium'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <FileCode className="w-3 h-3" />
+                    <span>Paste / Edit Code</span>
+                  </button>
+                </div>
+
+                {/* File Upload Zone */}
+                {jsonBatchInputMode === 'upload' ? (
+                  <div className="relative border-2 border-dashed border-[#2e3748] hover:border-[#8699b8]/60 rounded-xl p-5 text-center bg-[#151821] hover:bg-[#181d27] transition group cursor-pointer">
+                    <input
+                      type="file"
+                      accept=".json"
+                      onChange={handleJsonFileUpload}
+                      className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                    />
+                    <Upload className="w-6 h-6 text-[#8699b8] group-hover:text-amber-400 mx-auto mb-2 transition" />
+                    <p className="text-xs font-semibold text-white mb-0.5">Drop your batch .json here</p>
+                    <p className="text-[11px] text-slate-400">or click to browse from computer</p>
+                  </div>
+                ) : (
+                  <div>
+                    <textarea
+                      value={jsonBatchRaw}
+                      onChange={(e) => parseJsonBatch(e.target.value)}
+                      rows={7}
+                      placeholder='Paste JSON here (e.g. { "generations": [ { "prompt": "..." } ] })'
+                      className="w-full bg-[#151821] border border-[#262d3b] rounded-xl p-2.5 font-mono text-[11px] text-white placeholder-slate-600 focus:outline-none focus:border-[#8699b8] transition resize-y min-h-[140px]"
+                    />
+                  </div>
+                )}
+
+                {/* Error Banner */}
+                {jsonBatchError && (
+                  <div className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                    <span className="line-clamp-2">{jsonBatchError}</span>
+                  </div>
+                )}
+
+                {/* Detection Summary & Album Name */}
+                {jsonBatchGenerations.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                        <span className="font-semibold">Detected {jsonBatchGenerations.length} Generations</span>
+                      </div>
+                      <span className="text-[10px] bg-emerald-500/20 px-2 py-0.5 rounded font-mono">
+                        Ready to Queue
+                      </span>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                          Target Album Name
+                        </label>
+                        <span className="text-[10px] text-slate-400">Auto-organizes in gallery</span>
+                      </div>
+                      <input
+                        type="text"
+                        value={jsonBatchAlbumName}
+                        onChange={(e) => setJsonBatchAlbumName(e.target.value)}
+                        placeholder="Album name..."
+                        className="w-full bg-[#151821] border border-[#262d3b] rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#8699b8] transition"
+                      />
+                    </div>
+
+                    {/* Detected Generations Preview List */}
+                    <div>
+                      <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-1">
+                        Preview Detected Queue ({jsonBatchGenerations.length})
+                      </label>
+                      <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                        {jsonBatchGenerations.map((g, idx) => (
+                          <div
+                            key={idx}
+                            className="p-2 rounded-lg bg-[#151821] border border-[#262d3b] text-left text-xs"
+                          >
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="font-mono text-[10px] font-bold text-amber-400">#{idx + 1}</span>
+                              <div className="flex items-center gap-1 text-[10px]">
+                                {g.aspect_ratio && (
+                                  <span className="px-1.5 py-0.2 rounded bg-[#222836] text-slate-300 border border-[#2e3748]">
+                                    {g.aspect_ratio}
+                                  </span>
+                                )}
+                                <span className="px-1.5 py-0.2 rounded bg-[#222836] text-slate-400 font-mono">
+                                  {g.seed && g.seed > 0 ? `Seed: ${g.seed}` : 'Random Seed'}
+                                </span>
+                              </div>
+                            </div>
+                            <p className="text-[11px] text-slate-300 line-clamp-2 leading-relaxed">
+                              {g.prompt}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
             )}
@@ -2107,8 +2466,15 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={generationMode === 'single' ? handleGenerateSingle : handleGenerateMulti}
-                  className="flex-1 py-3.5 px-4 rounded-xl bg-[#4d6b53] hover:bg-[#5c7f63] text-white font-semibold text-sm shadow-lg shadow-[#4d6b53]/25 flex items-center justify-center gap-2 transition active:scale-[0.99] border border-[#5c7f63]/50"
+                  onClick={
+                    generationMode === 'single'
+                      ? handleGenerateSingle
+                      : generationMode === 'multiprompt'
+                      ? handleGenerateMulti
+                      : handleGenerateJsonBatch
+                  }
+                  disabled={generationMode === 'json_batch' && jsonBatchGenerations.length === 0}
+                  className="flex-1 py-3.5 px-4 rounded-xl bg-[#4d6b53] hover:bg-[#5c7f63] text-white font-semibold text-sm shadow-lg shadow-[#4d6b53]/25 flex items-center justify-center gap-2 transition active:scale-[0.99] border border-[#5c7f63]/50 disabled:opacity-50"
                 >
                   <Sparkles className="w-4 h-4 text-emerald-200" />
                   <span>
@@ -2116,7 +2482,9 @@ export default function App() {
                       ? batchCount === 1
                         ? 'Generate Image'
                         : `Queue ${batchCount} Images (Sequential)`
-                      : `Queue ${multiPrompts.filter((p) => p.trim()).length} Prompts (Sequential)`}
+                      : generationMode === 'multiprompt'
+                      ? `Queue ${multiPrompts.filter((p) => p.trim()).length} Prompts (Sequential)`
+                      : `Queue ${jsonBatchGenerations.length} JSON Generations (Sequential)`}
                   </span>
                 </button>
 
@@ -2420,7 +2788,13 @@ export default function App() {
                     </p>
                     <button
                       type="button"
-                      onClick={generationMode === 'single' ? handleGenerateSingle : handleGenerateMulti}
+                      onClick={
+                        generationMode === 'single'
+                          ? handleGenerateSingle
+                          : generationMode === 'multiprompt'
+                          ? handleGenerateMulti
+                          : handleGenerateJsonBatch
+                      }
                       className="px-5 py-2.5 rounded-xl bg-[#4d6b53] hover:bg-[#5c7f63] text-white text-xs font-semibold shadow-md transition"
                     >
                       Begin Rendering
@@ -2435,7 +2809,13 @@ export default function App() {
                   {/* Regenerate Button (Moss Green) */}
                   <button
                     type="button"
-                    onClick={generationMode === 'single' ? handleGenerateSingle : handleGenerateMulti}
+                    onClick={
+                      generationMode === 'single'
+                        ? handleGenerateSingle
+                        : generationMode === 'multiprompt'
+                        ? handleGenerateMulti
+                        : handleGenerateJsonBatch
+                    }
                     className="px-3.5 py-1.5 rounded-lg bg-[#4d6b53] hover:bg-[#5c7f63] text-white font-medium text-xs flex items-center gap-1.5 shadow-sm transition"
                     title="Regenerate with current settings"
                   >

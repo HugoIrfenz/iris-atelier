@@ -138,6 +138,25 @@ class CreateAlbumRequest(BaseModel):
 class AlbumItemsRequest(BaseModel):
     job_ids: List[str]
 
+class JSONBatchItem(BaseModel):
+    prompt: str
+    negative_prompt: Optional[str] = None
+    model: Optional[str] = None
+    aspect_ratio: Optional[str] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    steps: Optional[int] = None
+    cfg: Optional[float] = None
+    sampler: Optional[str] = None
+    scheduler: Optional[str] = None
+    seed: Optional[int] = None
+
+class JSONBatchRequest(BaseModel):
+    album_name: Optional[str] = None
+    album_id: Optional[int] = None
+    defaults: Optional[Dict[str, Any]] = None
+    generations: List[JSONBatchItem]
+
 async def broadcast_state():
     if current_job["start_time"] > 0 and current_job["status"] in ["loading", "sampling", "decoding"]:
         current_job["elapsed"] = round(time.time() - current_job["start_time"], 1)
@@ -782,6 +801,188 @@ async def generate_pose_burst(req: PoseBurstRequest):
     return {
         "status": "queued",
         "burst_count": len(modifiers),
+        "album_id": album_id,
+        "album_name": album_name,
+        "jobs": created_jobs,
+        "queue_size": len(pending_queue)
+    }
+
+@app.get("/api/template/batch-json")
+async def get_batch_json_template():
+    return {
+        "album_name": "Atelier Concept Showcase",
+        "defaults": {
+            "model": "anima-turbo-v1.1-Q5_K_M.gguf",
+            "negative_prompt": "worst quality, low quality, blurry, deformed, bad anatomy",
+            "aspect_ratio": "Portrait (2:3)",
+            "width": 768,
+            "height": 1152,
+            "steps": 8,
+            "cfg": 1.0,
+            "sampler": "euler",
+            "scheduler": "sgm_uniform"
+        },
+        "generations": [
+            {
+                "prompt": "masterpiece, best quality, 1girl, Zaria, cyan hair, heterochromia, walking toward camera, dynamic fashion pose, white background",
+                "aspect_ratio": "Portrait (2:3)",
+                "seed": -1
+            },
+            {
+                "prompt": "masterpiece, best quality, 1girl, Nixia, silver hair, purple highlights, gothic corset, deep flat-footed squat, white background",
+                "aspect_ratio": "Portrait (2:3)",
+                "seed": -1
+            },
+            {
+                "prompt": "masterpiece, best quality, 1girl, Angela, light blue bob, amber eyes, lab coat, sitting upright with arms crossed, luxury modern office background",
+                "aspect_ratio": "Landscape (3:2)",
+                "width": 1152,
+                "height": 768,
+                "seed": -1
+            },
+            {
+                "prompt": "masterpiece, best quality, 1girl, Virelia, gentle maid, pink twin hair, kneeling seiza formal posture, cozy cafe interior, soft warm sunshine",
+                "aspect_ratio": "Portrait (2:3)",
+                "seed": -1
+            },
+            {
+                "prompt": "masterpiece, best quality, 1woman, Vivianne, tall mature kuudere, silver-white hair, lying on back looking at camera, inverted angle, white background",
+                "aspect_ratio": "Square (1:1)",
+                "width": 896,
+                "height": 896,
+                "seed": -1
+            }
+        ]
+    }
+
+@app.post("/api/generate-batch-json")
+async def generate_batch_json(req: JSONBatchRequest):
+    import random
+    if not req.generations:
+        raise HTTPException(status_code=400, detail="No generations provided in JSON batch.")
+
+    defs = req.defaults or {}
+    global_model = defs.get("model", "anima-turbo-v1.1-Q5_K_M.gguf")
+    global_neg = defs.get("negative_prompt", "worst quality, low quality, blurry, deformed")
+    global_ar = defs.get("aspect_ratio", "Portrait")
+    global_w = int(defs.get("width", 768))
+    global_h = int(defs.get("height", 1152))
+    global_steps = int(defs.get("steps", 8))
+    global_cfg = float(defs.get("cfg", 1.0))
+    global_sampler = defs.get("sampler", "euler")
+    global_scheduler = defs.get("scheduler", "sgm_uniform")
+
+    # Resolve or create album
+    album_id = req.album_id
+    album_name = req.album_name
+    if not album_id:
+        if not album_name or not album_name.strip():
+            album_name = f"JSON Batch - {datetime.now().strftime('%b %d %H:%M')}"
+        created_alb = database.create_album(album_name.strip())
+        album_id = created_alb["id"]
+        album_name = created_alb["name"]
+
+    created_jobs = []
+    job_ids_for_album = []
+    total_count = len(req.generations)
+
+    with open(WORKFLOW_GGUF, "r", encoding="utf-8") as f:
+        base_wf_gguf = json.load(f)
+    with open(WORKFLOW_CHECKPOINT, "r", encoding="utf-8") as f:
+        base_wf_ckpt = json.load(f)
+
+    for i, gen in enumerate(req.generations):
+        prompt_text = gen.prompt.strip()
+        if not prompt_text:
+            continue
+
+        item_model = gen.model or global_model
+        item_neg = gen.negative_prompt or global_neg
+        item_ar = gen.aspect_ratio or global_ar
+        item_w = int(gen.width or global_w)
+        item_h = int(gen.height or global_h)
+        item_steps = int(gen.steps or global_steps)
+        item_cfg = float(gen.cfg if gen.cfg is not None else global_cfg)
+        item_sampler = gen.sampler or global_sampler
+        item_scheduler = gen.scheduler or global_scheduler
+
+        job_id = str(uuid.uuid4())
+        job_ids_for_album.append(job_id)
+
+        if gen.seed is None or gen.seed < 0:
+            job_seed = random.randint(1, 9999999999)
+        else:
+            job_seed = int(gen.seed)
+
+        is_gguf = item_model.endswith(".gguf") or "Q5" in item_model or "Q4" in item_model
+        base_wf = base_wf_gguf if is_gguf else base_wf_ckpt
+        wf = json.loads(json.dumps(base_wf))
+
+        if is_gguf:
+            wf["1"]["inputs"]["unet_name"] = item_model
+            wf["4"]["inputs"]["width"] = item_w
+            wf["4"]["inputs"]["height"] = item_h
+            wf["5"]["inputs"]["text"] = prompt_text
+            wf["6"]["inputs"]["text"] = item_neg
+            wf["7"]["inputs"]["seed"] = job_seed
+            wf["7"]["inputs"]["steps"] = item_steps
+            wf["7"]["inputs"]["cfg"] = item_cfg
+            wf["7"]["inputs"]["sampler_name"] = item_sampler
+            wf["7"]["inputs"]["scheduler"] = item_scheduler
+        else:
+            wf["1"]["inputs"]["ckpt_name"] = item_model
+            wf["2"]["inputs"]["width"] = item_w
+            wf["2"]["inputs"]["height"] = item_h
+            wf["3"]["inputs"]["text"] = prompt_text
+            wf["4"]["inputs"]["text"] = item_neg
+            wf["5"]["inputs"]["seed"] = job_seed
+            wf["5"]["inputs"]["steps"] = item_steps
+            wf["5"]["inputs"]["cfg"] = item_cfg
+            wf["5"]["inputs"]["sampler_name"] = item_sampler
+            wf["5"]["inputs"]["scheduler"] = item_scheduler
+
+        meta = {
+            "job_id": job_id,
+            "prompt": prompt_text,
+            "negative_prompt": item_neg,
+            "model": item_model,
+            "aspect_ratio": item_ar,
+            "width": item_w,
+            "height": item_h,
+            "steps": item_steps,
+            "cfg": item_cfg,
+            "sampler": item_sampler,
+            "scheduler": item_scheduler,
+            "seed": job_seed,
+            "favorite": 0,
+            "album_id": album_id
+        }
+
+        job_item = {
+            "job_id": job_id,
+            "workflow": wf,
+            "seed": job_seed,
+            "steps": item_steps,
+            "batch_index": len(created_jobs) + 1,
+            "batch_total": total_count,
+            "metadata": meta
+        }
+        pending_queue.append(job_item)
+        created_jobs.append({"job_id": job_id, "seed": job_seed, "prompt": prompt_text[:35]})
+
+    if album_id and job_ids_for_album:
+        database.add_to_album(album_id, job_ids_for_album)
+
+    current_job["queue_size"] = len(pending_queue)
+    current_job["queue_items"] = [
+        {"job_id": q["job_id"], "seed": q["seed"], "index": q["batch_index"], "total": q["batch_total"], "prompt": q["metadata"]["prompt"][:35]}
+        for q in pending_queue
+    ]
+    await broadcast_state()
+
+    return {
+        "status": "queued",
+        "batch_count": len(created_jobs),
         "album_id": album_id,
         "album_name": album_name,
         "jobs": created_jobs,
