@@ -347,6 +347,7 @@ export default function App() {
   const [jsonBatchError, setJsonBatchError] = useState<string>('')
   const [jsonBatchAlbumName, setJsonBatchAlbumName] = useState<string>('Atelier Concept Showcase')
   const [jsonBatchGenerations, setJsonBatchGenerations] = useState<any[]>([])
+  const [jsonBatchStartIndex, setJsonBatchStartIndex] = useState<number>(1)
   const [isQueueingJsonBatch, setIsQueueingJsonBatch] = useState<boolean>(false)
   const [jsonBatchInputMode, setJsonBatchInputMode] = useState<'upload' | 'paste'>('upload')
 
@@ -970,6 +971,7 @@ export default function App() {
       }
 
       setJsonBatchGenerations(validGens)
+      setJsonBatchStartIndex(1)
       if (parsed.album_name && typeof parsed.album_name === 'string') {
         setJsonBatchAlbumName(parsed.album_name)
       } else if (!jsonBatchAlbumName || jsonBatchAlbumName === 'Atelier Concept Showcase') {
@@ -1065,6 +1067,14 @@ export default function App() {
       return
     }
 
+    const startFrom = Math.max(1, Math.min(jsonBatchGenerations.length, jsonBatchStartIndex || 1))
+    const targetGenerations = jsonBatchGenerations.slice(startFrom - 1)
+
+    if (targetGenerations.length === 0) {
+      alert(`No generations left from index #${startFrom}.`)
+      return
+    }
+
     try {
       setIsQueueingJsonBatch(true)
       const payload = {
@@ -1080,7 +1090,7 @@ export default function App() {
           sampler,
           scheduler
         },
-        generations: jsonBatchGenerations
+        generations: targetGenerations
       }
 
       const res = await fetch('/api/generate-batch-json', {
@@ -1094,7 +1104,8 @@ export default function App() {
         setActiveTab('canvas')
         loadAlbums()
         loadGallery()
-        alert(`Queued ${data.batch_count} sequential generations from JSON into album "${data.album_name}"!`)
+        const rangeNotice = startFrom > 1 ? ` (resumed from #${startFrom} of ${jsonBatchGenerations.length})` : ''
+        alert(`Queued ${data.batch_count} sequential generations${rangeNotice} into album "${data.album_name}"!`)
       } else {
         const err = await res.json()
         alert('Failed to launch JSON batch: ' + (err.detail || 'Unknown error'))
@@ -2195,6 +2206,37 @@ export default function App() {
                       />
                     </div>
 
+                    {/* Resume / Start From Item # */}
+                    <div className="bg-[#151821] border border-[#262d3b] p-2.5 rounded-xl text-xs space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[11px] font-semibold text-slate-300 flex items-center gap-1.5">
+                          <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Start / Resume From Item #</span>
+                        </label>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] text-slate-500 font-mono">#</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={jsonBatchGenerations.length}
+                            value={jsonBatchStartIndex}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value) || 1
+                              setJsonBatchStartIndex(Math.max(1, Math.min(jsonBatchGenerations.length, val)))
+                            }}
+                            className="w-16 bg-[#1c212d] border border-[#2e3748] rounded-lg px-2 py-1 text-xs text-amber-300 font-mono font-bold focus:outline-none focus:border-amber-400 text-center"
+                          />
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-slate-400">
+                        {jsonBatchStartIndex > 1
+                          ? `Will skip #1–#${jsonBatchStartIndex - 1} and queue ${
+                              jsonBatchGenerations.length - jsonBatchStartIndex + 1
+                            } remaining items (#${jsonBatchStartIndex} to #${jsonBatchGenerations.length}).`
+                          : `Queueing all ${jsonBatchGenerations.length} items from start.`}
+                      </p>
+                    </div>
+
                     {/* Detected Generations Preview List */}
                     <div>
                       <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-1">
@@ -2585,6 +2627,8 @@ export default function App() {
                         : `Queue ${batchCount} Images (Sequential)`
                       : generationMode === 'multiprompt'
                       ? `Queue ${multiPrompts.filter((p) => p.trim()).length} Prompts (Sequential)`
+                      : jsonBatchStartIndex > 1
+                      ? `Queue ${jsonBatchGenerations.length - jsonBatchStartIndex + 1} JSON Generations (from #${jsonBatchStartIndex})`
                       : `Queue ${jsonBatchGenerations.length} JSON Generations (Sequential)`}
                   </span>
                 </button>
