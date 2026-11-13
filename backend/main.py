@@ -5,19 +5,22 @@ import zipfile
 import json
 import uuid
 import time
+import socket
+import base64
 import asyncio
 import subprocess
 import shutil
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse, HTMLResponse
 from pydantic import BaseModel
 import httpx
 import websockets
+import qrcode
 
 import database
 import downloader
@@ -41,6 +44,97 @@ app.add_middleware(
 )
 
 database.init_db()
+
+def get_local_ip() -> str:
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.1)
+        s.connect(('10.254.254.254', 1))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return '127.0.0.1'
+
+def generate_qr_base64(url: str) -> str:
+    try:
+        qr = qrcode.QRCode(box_size=6, border=2)
+        qr.add_data(url)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+    except Exception as e:
+        print("QR Code generation error:", e)
+        return ""
+
+def is_lan_enabled() -> bool:
+    val = database.get_setting("lan_enabled", "true")
+    return val.lower() in ("true", "1", "yes", "on")
+
+def set_lan_enabled(enabled: bool):
+    database.set_setting("lan_enabled", "true" if enabled else "false")
+
+@app.middleware("http")
+async def lan_access_middleware(request: Request, call_next):
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    is_local = client_ip in ("127.0.0.1", "localhost", "::1", "testclient")
+    
+    if not is_local and not is_lan_enabled():
+        if request.url.path in ("/api/lan/status",):
+            return await call_next(request)
+
+        if "text/html" in request.headers.get("accept", "") or request.url.path in ("/", "/lan", "/lan/"):
+            html = """
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Iris Atelier — LAN Access Offline</title>
+              <style>
+                body {
+                  margin: 0; padding: 0; background: #0f1117; color: #e2e8f0;
+                  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                  display: flex; align-items: center; justify-content: center; min-height: 100vh;
+                  text-align: center; box-sizing: border-box; padding: 20px;
+                }
+                .card {
+                  background: #181c26; border: 1px solid #2e3748; border-radius: 24px;
+                  max-width: 400px; width: 100%; padding: 36px 24px; box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+                }
+                .icon { font-size: 44px; margin-bottom: 14px; }
+                h2 { font-size: 20px; margin: 0 0 8px 0; color: #fff; font-weight: 700; }
+                p { font-size: 13px; color: #94a3b8; line-height: 1.6; margin: 0 0 24px 0; }
+                .badge {
+                  display: inline-block; background: rgba(239, 68, 68, 0.15); color: #f87171;
+                  border: 1px solid rgba(239, 68, 68, 0.3); padding: 4px 12px; border-radius: 999px;
+                  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+                  margin-bottom: 16px;
+                }
+                .btn {
+                  display: inline-block; background: #4d6b53; color: white; padding: 12px 24px;
+                  border-radius: 12px; font-size: 13px; font-weight: 600; text-decoration: none;
+                  cursor: pointer; border: none; width: 100%; box-sizing: border-box;
+                }
+              </style>
+            </head>
+            <body>
+              <div class="card">
+                <div class="badge">LAN Broadcast Offline</div>
+                <div class="icon">🔒</div>
+                <h2>LAN Access is Currently OFF</h2>
+                <p>Iris Atelier Wi-Fi sharing is turned off. Please toggle <strong>LAN Broadcast ON</strong> in the top header of your desktop studio to access live progress and pictures on this phone.</p>
+                <button class="btn" onclick="location.reload()">Retry Connection</button>
+              </div>
+            </body>
+            </html>
+            """
+            return HTMLResponse(content=html, status_code=403)
+        return JSONResponse(status_code=403, content={"detail": "LAN access is currently disabled."})
+
+    return await call_next(request)
 
 connected_clients: List[WebSocket] = []
 
@@ -156,6 +250,9 @@ class JSONBatchRequest(BaseModel):
     album_id: Optional[int] = None
     defaults: Optional[Dict[str, Any]] = None
     generations: List[JSONBatchItem]
+
+class LANToggleRequest(BaseModel):
+    enabled: bool
 
 async def broadcast_state():
     if current_job["start_time"] > 0 and current_job["status"] in ["loading", "sampling", "decoding"]:
@@ -357,6 +454,12 @@ async def startup_event():
 
 @app.websocket("/api/ws/status")
 async def websocket_endpoint(websocket: WebSocket):
+    client_ip = websocket.client.host if websocket.client else "127.0.0.1"
+    is_local = client_ip in ("127.0.0.1", "localhost", "::1", "testclient")
+    if not is_local and not is_lan_enabled():
+        await websocket.close(code=1008, reason="LAN access is currently disabled")
+        return
+
     await websocket.accept()
     connected_clients.append(websocket)
     try:
@@ -366,6 +469,40 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         if websocket in connected_clients:
             connected_clients.remove(websocket)
+
+# LAN Broadcast Endpoints
+@app.get("/api/lan/status")
+async def get_lan_status(request: Request):
+    ip = get_local_ip()
+    port = 7860
+    url = f"http://{ip}:{port}/lan"
+    enabled = is_lan_enabled()
+    qr = generate_qr_base64(url) if enabled else ""
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    is_local = client_ip in ("127.0.0.1", "localhost", "::1", "testclient")
+    return {
+        "enabled": enabled,
+        "local_ip": ip,
+        "port": port,
+        "url": url,
+        "qr_code": qr,
+        "is_local": is_local
+    }
+
+@app.post("/api/lan/toggle")
+async def toggle_lan(req: LANToggleRequest):
+    set_lan_enabled(req.enabled)
+    ip = get_local_ip()
+    port = 7860
+    url = f"http://{ip}:{port}/lan"
+    qr = generate_qr_base64(url) if req.enabled else ""
+    return {
+        "enabled": req.enabled,
+        "local_ip": ip,
+        "port": port,
+        "url": url,
+        "qr_code": qr
+    }
 
 # Models & Importer Endpoints
 @app.get("/api/models")
@@ -1141,5 +1278,14 @@ async def shutdown_system():
     return {"status": "shutting_down", "message": "All AI generation services are stopping..."}
 
 FRONTEND_DIST = r"D:\AI\app\web\dist"
+
+@app.get("/lan")
+@app.get("/lan/{full_path:path}")
+async def serve_lan_companion():
+    index_file = os.path.join(FRONTEND_DIST, "index.html")
+    if os.path.exists(index_file):
+        return FileResponse(index_file)
+    raise HTTPException(status_code=404, detail="Frontend build not found")
+
 if os.path.exists(FRONTEND_DIST):
     app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")

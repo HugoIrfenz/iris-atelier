@@ -135,6 +135,12 @@ def init_db():
                 PRIMARY KEY (album_id, job_id)
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
         # Seed default characters if empty or missing any
         for char in DEFAULT_CHARACTERS:
             existing = conn.execute("SELECT id FROM characters WHERE id = ?", (char["id"],)).fetchone()
@@ -362,3 +368,15 @@ def batch_delete_generations(job_ids: list):
             deleted_count += cur.rowcount
     conn.close()
     return deleted_count
+
+def get_setting(key: str, default: str = None) -> str:
+    conn = get_connection()
+    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    conn.close()
+    return row["value"] if row else default
+
+def set_setting(key: str, value: str):
+    conn = get_connection()
+    with conn:
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, str(value)))
+    conn.close()

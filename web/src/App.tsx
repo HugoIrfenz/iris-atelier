@@ -48,8 +48,13 @@ import {
   FolderCheck,
   Camera,
   FileCode,
-  Upload
+  Upload,
+  Wifi,
+  WifiOff,
+  Smartphone,
+  QrCode
 } from 'lucide-react'
+import { LanCompanion } from './LanCompanion'
 
 interface Album {
   id: number
@@ -351,6 +356,59 @@ export default function App() {
   const [showModelModal, setShowModelModal] = useState(false)
   const [modelModalTab, setModelModalTab] = useState<'url' | 'local' | 'installed'>('url')
 
+  // LAN Broadcast & Mobile Companion state
+  const [isLanView, setIsLanView] = useState<boolean>(() => {
+    return window.location.pathname.startsWith('/lan')
+  })
+  const [lanStatus, setLanStatus] = useState<{
+    enabled: boolean
+    local_ip: string
+    port: number
+    url: string
+    qr_code: string
+    is_local?: boolean
+  }>({
+    enabled: true,
+    local_ip: '127.0.0.1',
+    port: 7860,
+    url: 'http://127.0.0.1:7860/lan',
+    qr_code: ''
+  })
+  const [showLanModal, setShowLanModal] = useState<boolean>(false)
+  const [isTogglingLan, setIsTogglingLan] = useState<boolean>(false)
+  const [copiedLanUrl, setCopiedLanUrl] = useState<boolean>(false)
+
+  const fetchLanStatus = async () => {
+    try {
+      const res = await fetch('/api/lan/status')
+      if (res.ok) {
+        const data = await res.json()
+        setLanStatus(data)
+      }
+    } catch (e) {
+      console.error('Failed to fetch LAN status', e)
+    }
+  }
+
+  const handleToggleLan = async (nextEnabled: boolean) => {
+    setIsTogglingLan(true)
+    try {
+      const res = await fetch('/api/lan/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: nextEnabled })
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setLanStatus((prev) => ({ ...prev, ...data }))
+      }
+    } catch (e) {
+      alert('Failed to update LAN status: ' + e)
+    } finally {
+      setIsTogglingLan(false)
+    }
+  }
+
   // Importer form states
   const [downloadUrl, setDownloadUrl] = useState('')
   const [downloadType, setDownloadType] = useState('unet')
@@ -452,6 +510,7 @@ export default function App() {
 
   useEffect(() => {
     loadModels()
+    fetchLanStatus()
   }, [])
 
   // Load albums
@@ -1496,6 +1555,17 @@ export default function App() {
     )
   }
 
+  if (isLanView) {
+    return (
+      <LanCompanion
+        onSwitchToDesktop={() => {
+          window.history.pushState({}, '', '/')
+          setIsLanView(false)
+        }}
+      />
+    )
+  }
+
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-[#151821] text-slate-100 font-sans selection:bg-[#4d6b53] selection:text-white">
       {/* ================= TOP HEADER BAR ================= */}
@@ -1553,6 +1623,37 @@ export default function App() {
               <span className="text-slate-300 font-medium">D: {systemStatus.storage.d_drive.free_gb} GB</span>
             </div>
           )}
+
+          {/* LAN Wi-Fi Broadcast Pill */}
+          <button
+            type="button"
+            onClick={() => {
+              fetchLanStatus()
+              setShowLanModal(true)
+            }}
+            className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition font-medium border shadow-sm ${
+              lanStatus.enabled
+                ? 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                : 'bg-[#222836] hover:bg-[#2a3243] text-slate-400 border-[#2e3748]'
+            }`}
+            title={lanStatus.enabled ? "LAN Broadcast Active - Click for QR code & mobile companion" : "LAN Sharing is OFF - Click to enable"}
+          >
+            {lanStatus.enabled ? (
+              <>
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <Wifi className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="hidden sm:inline">LAN Online</span>
+              </>
+            ) : (
+              <>
+                <WifiOff className="w-3.5 h-3.5 text-slate-500" />
+                <span className="hidden sm:inline">LAN Off</span>
+              </>
+            )}
+          </button>
 
           {/* Models & Importer Modal Button */}
           <button
@@ -3999,6 +4100,143 @@ export default function App() {
                 <span>{isQueueingBurst ? 'Queueing Shots...' : `Queue ${burstCount} Angles & Poses`}</span>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* LAN Wi-Fi Sharing Modal */}
+      {showLanModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#1c212d] border border-[#2e3748] rounded-2xl max-w-md w-full p-6 shadow-2xl">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-[#262d3b] mb-4">
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center border shadow-inner ${
+                  lanStatus.enabled
+                    ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                    : 'bg-slate-800 border-slate-700 text-slate-400'
+                }`}>
+                  <Smartphone className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-serif font-bold text-lg text-white">LAN Wi-Fi Sharing</h3>
+                  <p className="text-[11px] text-slate-400">
+                    Access live progress and pictures from your phone
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowLanModal(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-[#222836] transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Master Toggle Switch */}
+            <div className="mb-5 bg-[#151821] p-4 rounded-xl border border-[#262d3b] flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-white">LAN Broadcast</span>
+                  <span className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full ${
+                    lanStatus.enabled
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                      : 'bg-red-500/20 text-red-300 border border-red-500/30'
+                  }`}>
+                    {lanStatus.enabled ? 'ON' : 'OFF'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  {lanStatus.enabled
+                    ? 'Allow devices on this Wi-Fi to view live progress & gallery'
+                    : 'Block remote Wi-Fi devices. Only localhost can connect.'}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleToggleLan(!lanStatus.enabled)}
+                disabled={isTogglingLan}
+                className={`w-12 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${
+                  lanStatus.enabled ? 'bg-emerald-500 justify-end' : 'bg-slate-700 justify-start'
+                }`}
+              >
+                <div className="bg-white w-4 h-4 rounded-full shadow-md" />
+              </button>
+            </div>
+
+            {lanStatus.enabled ? (
+              <div className="space-y-4">
+                {/* QR Code Scannable Card */}
+                {lanStatus.qr_code && (
+                  <div className="bg-[#12151e] border border-[#262d3b] p-4 rounded-xl text-center space-y-2">
+                    <div className="bg-white p-2.5 rounded-xl inline-block shadow-lg mx-auto">
+                      <img
+                        src={lanStatus.qr_code}
+                        alt="Scan to open LAN Companion"
+                        className="w-44 h-44 mx-auto"
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-400 flex items-center justify-center gap-1.5 font-medium">
+                      <QrCode className="w-3.5 h-3.5 text-[#8699b8]" />
+                      Scan with your phone's camera on the same Wi-Fi
+                    </p>
+                  </div>
+                )}
+
+                {/* LAN URL with Copy Button */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] uppercase font-semibold text-slate-400 tracking-wider">
+                    Direct Companion URL
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={lanStatus.url}
+                      className="flex-1 bg-[#151821] border border-[#262d3b] rounded-xl px-3 py-2 text-xs text-white font-mono select-all focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(lanStatus.url)
+                        setCopiedLanUrl(true)
+                        setTimeout(() => setCopiedLanUrl(false), 2000)
+                      }}
+                      className="px-3 py-2 rounded-xl bg-[#222836] hover:bg-[#2a3243] text-slate-200 text-xs font-medium border border-[#2e3748] transition flex items-center gap-1.5 shrink-0"
+                    >
+                      {copiedLanUrl ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedLanUrl ? 'Copied' : 'Copy'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Test / Preview Button */}
+                <div className="pt-1 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowLanModal(false)
+                      window.history.pushState({}, '', '/lan')
+                      setIsLanView(true)
+                    }}
+                    className="flex-1 py-2.5 rounded-xl bg-[#222836] hover:bg-[#2a3243] text-slate-200 text-xs font-medium border border-[#2e3748] transition flex items-center justify-center gap-1.5"
+                  >
+                    <Smartphone className="w-3.5 h-3.5 text-[#8699b8]" />
+                    <span>Preview Mobile Companion</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-6 px-4 bg-[#141822] border border-[#222938] rounded-xl space-y-2">
+                <WifiOff className="w-8 h-8 text-slate-500 mx-auto" />
+                <h4 className="text-xs font-semibold text-slate-300">LAN Broadcast is Currently OFF</h4>
+                <p className="text-[11px] text-slate-500 max-w-xs mx-auto">
+                  Your phone and other Wi-Fi devices will receive a blocked 403 screen. Toggle the switch above to ON to generate a QR code and connect your phone.
+                </p>
+              </div>
+            )}
           </div>
         </div>
       )}
